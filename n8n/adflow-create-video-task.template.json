@@ -1,0 +1,171 @@
+{
+  "name": "脚本创建视频任务 template",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "name": "Webhook: Create Video Task",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "path": "final-create-video-task",
+        "httpMethod": "GET",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "a82d2249-3bd3-4cf1-97d7-fc275a54cda7",
+      "webhookId": "345487dc-4ee2-4190-b7fd-743db798aa13"
+    },
+    {
+      "name": "Create video task",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "\n\nconst APP_TOKEN = \"YOUR_FEISHU_BASE_TOKEN\";\nconst PRODUCT_TABLE = \"YOUR_PRODUCT_TABLE_ID\";\nconst HOOK_TABLE = \"YOUR_HOOK_TABLE_ID\";\nconst SCRIPT_TABLE = \"YOUR_SCRIPT_TABLE_ID\";\nconst VIDEO_TABLE = \"YOUR_VIDEO_TABLE_ID\";\nconst SETTINGS_TABLE = 'YOUR_OPTIONAL_SETTINGS_TABLE_ID';\nconst FEISHU_APP_ID = 'YOUR_FEISHU_APP_ID';\nconst FEISHU_APP_SECRET = String($env.FEISHU_APP_SECRET || '');\nconst NL = String.fromCharCode(10);\nconst httpRequest = (options) => this.helpers.httpRequest(options);\n\nasync function requestJson(options, label) {\n  const response = await httpRequest({\n    ...options,\n    json: true,\n    simple: false,\n    resolveWithFullResponse: true,\n    timeout: options.timeout || 120000,\n  });\n  const statusCode = response.statusCode || response.status || 200;\n  const body = response.body ?? response;\n  if (statusCode < 200 || statusCode >= 300) {\n    throw new Error(label + ' HTTP ' + statusCode + ': ' + JSON.stringify(body).slice(0, 1000));\n  }\n  return body;\n}\n\nasync function feishuToken() {\n  const res = await requestJson({\n    method: 'POST',\n    url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',\n    headers: { 'Content-Type': 'application/json' },\n    body: { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET },\n  }, '飞书取 token');\n  if (!res.tenant_access_token) throw new Error('飞书 token 为空。');\n  return res.tenant_access_token;\n}\n\nasync function getRecord(token, tableId, recordId) {\n  const res = await requestJson({\n    method: 'GET',\n    url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId,\n    headers: { Authorization: 'Bearer ' + token },\n  }, '飞书读记录');\n  return res?.data?.record;\n}\n\nasync function listRecords(token, tableId, pageSize = 100) {\n  const res = await requestJson({\n    method: 'GET',\n    url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize,\n    headers: { Authorization: 'Bearer ' + token },\n  }, '飞书列记录');\n  return res?.data?.items || [];\n}\n\nasync function updateRecord(token, tableId, recordId, fields) {\n  await requestJson({\n    method: 'PUT',\n    url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId,\n    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' },\n    body: { fields },\n  }, '飞书更新记录');\n}\n\nasync function createRecord(token, tableId, fields) {\n  const res = await requestJson({\n    method: 'POST',\n    url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records',\n    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' },\n    body: { fields },\n  }, '飞书创建记录');\n  const id = res?.data?.record?.record_id;\n  if (!id) throw new Error('飞书创建记录无 record_id: ' + JSON.stringify(res).slice(0, 800));\n  return id;\n}\n\nasync function batchCreate(token, tableId, records) {\n  if (!records.length) return [];\n  const res = await requestJson({\n    method: 'POST',\n    url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/batch_create',\n    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' },\n    body: { records },\n  }, '飞书批量创建记录');\n  return res?.data?.records || [];\n}\n\nfunction firstSelect(value) {\n  if (Array.isArray(value)) return String(value[0]?.text || value[0]?.name || value[0] || '');\n  return String(value || '');\n}\n\nfunction textCell(value) {\n  if (Array.isArray(value)) return value.map((x) => x?.text || x?.name || x).join('');\n  if (value && typeof value === 'object') return value.text || value.link || '';\n  return String(value || '');\n}\n\nfunction urlCell(value) {\n  if (Array.isArray(value)) return value[0]?.link || value[0]?.text || '';\n  if (value && typeof value === 'object') return value.link || value.text || '';\n  return String(value || '');\n}\n\nfunction linkIds(value) {\n  if (!Array.isArray(value)) return [];\n  return value.map((x) => x?.record_id || x?.id || x?.record_ids?.[0] || x).filter(Boolean);\n}\n\nfunction extractJson(text) {\n  if (typeof text !== 'string') return text;\n  const cleaned = text.replace(/^\\s*\\`\\`\\`(?:json)?/i, '').replace(/\\`\\`\\`\\s*$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch {}\n  const first = cleaned.indexOf('{');\n  const last = cleaned.lastIndexOf('}');\n  if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));\n  throw new Error('无法解析 JSON: ' + cleaned.slice(0, 500));\n}\n\nasync function getModelConfig(token) {\n  const rows = await listRecords(token, SETTINGS_TABLE, 20);\n  const enabled = rows.find((r) => firstSelect(r.fields['是否启用']) === '是') || rows[0];\n  const provider = firstSelect(enabled?.fields?.['LLM Provider']) || 'DeepSeek';\n  const model = textCell(enabled?.fields?.['模型名称']) || 'deepseek-chat';\n  const baseUrl = urlCell(enabled?.fields?.['OpenAI兼容Base URL']) || 'https://api.deepseek.com';\n  let key = '';\n    if (provider === 'DeepSeek') key = String($env.DEEPSEEK_API_KEY || '').trim();\n  if (provider === 'OpenAI') key = String($env.OPENAI_API_KEY || '').trim();\n  if (!key) throw new Error('缺少 ' + provider + ' API key，请在 n8n .env / credential 中配置。');\n  return { provider, model, baseUrl: baseUrl.replace(/\\/$/, ''), key };\n}\n\nasync function llm(token, system, user, { json = false, temperature = 0.55, maxTokens = 5000 } = {}) {\n  const cfg = await getModelConfig(token);\n  const body = {\n    model: cfg.model,\n    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],\n    temperature,\n    max_tokens: maxTokens,\n  };\n  if (json) body.response_format = { type: 'json_object' };\n  const response = await requestJson({\n    method: 'POST',\n    url: cfg.baseUrl + '/chat/completions',\n    headers: { Authorization: 'Bearer ' + cfg.key, 'Content-Type': 'application/json' },\n    body,\n  }, cfg.provider + ' LLM');\n  const content = response?.choices?.[0]?.message?.content;\n  if (!content) throw new Error(cfg.provider + ' 返回空内容: ' + JSON.stringify(response).slice(0, 600));\n  if (!json) return { text: String(content).trim(), config: cfg };\n  try {\n    return { json: extractJson(content), config: cfg };\n  } catch (error) {\n    const repair = await requestJson({\n      method: 'POST',\n      url: cfg.baseUrl + '/chat/completions',\n      headers: { Authorization: 'Bearer ' + cfg.key, 'Content-Type': 'application/json' },\n      body: {\n        model: cfg.model,\n        messages: [\n          { role: 'system', content: 'You repair malformed JSON. Return only valid JSON. Do not explain.' },\n          { role: 'user', content: 'Repair this into valid JSON:\\n\\n' + content },\n        ],\n        temperature: 0,\n        max_tokens: maxTokens,\n        response_format: { type: 'json_object' },\n      },\n    }, cfg.provider + ' JSON repair');\n    return { json: extractJson(repair?.choices?.[0]?.message?.content || ''), config: cfg };\n  }\n}\n\nfunction productBriefFromFields(fields) {\n  return {\n    source_url: urlCell(fields['产品链接']),\n    product_name: textCell(fields['产品名称']),\n    brand_name: textCell(fields['品牌名']),\n    category: textCell(fields['品类']),\n    price_info: textCell(fields['价格信息']),\n    product_main_image_url: urlCell(fields['产品主图URL']),\n    core_functions: textCell(fields['核心功能']),\n    materials_ingredients_technology: textCell(fields['材质成分技术']),\n    specs_parameters: textCell(fields['规格参数']),\n    usage_method: textCell(fields['使用方法']),\n    usage_scenarios: textCell(fields['适用场景']),\n    core_selling_points: textCell(fields['核心卖点']),\n    unique_mechanism: textCell(fields['独特机制']),\n    differentiation: textCell(fields['差异化优势']),\n    core_transformation: textCell(fields['核心蜕变']),\n    proof_points: textCell(fields['证据背书']),\n    target_audience: textCell(fields['目标人群']),\n    user_persona: textCell(fields['使用者画像']),\n    buyer_persona: textCell(fields['购买者画像']),\n    visceral_pain_points: textCell(fields['刺骨痛点']),\n    emotional_triggers: textCell(fields['情绪触发器']),\n    buyer_objections: textCell(fields['购买阻力']),\n    awareness_stage: firstSelect(fields['认知阶段']),\n    visual_hook_elements: textCell(fields['视觉抓手']),\n    offer_promo_guarantee: textCell(fields['优惠促销保障']),\n    recommended_hook_categories: textCell(fields['推荐Hook分类']),\n    risk_constraints: textCell(fields['禁说内容风险点']),\n    manual_notes: textCell(fields['用户手动备注']),\n  };\n}\n\nfunction urlValue(url) {\n  return url ? { text: url, link: url } : null;\n}\n\nfunction parseResultUrls(resultJson) {\n  if (!resultJson) return [];\n  let parsed = resultJson;\n  if (typeof parsed === 'string') {\n    try { parsed = JSON.parse(parsed); } catch { return []; }\n  }\n  const candidates = [parsed.resultUrls, parsed.result_urls, parsed.urls, parsed.imageUrls, parsed.videoUrls];\n  for (const c of candidates) if (Array.isArray(c) && c.length) return c.map(String);\n  if (typeof parsed.url === 'string') return [parsed.url];\n  return [];\n}\n\nconst query = $('Webhook: Create Video Task').first().json.query || {};\nconst scriptRecordId = String(query.script_record_id || '').trim();\nif (!scriptRecordId) throw new Error('缺少 script_record_id');\nconst token = await feishuToken();\nconst script = await getRecord(token, SCRIPT_TABLE, scriptRecordId);\nif (!script) throw new Error('找不到脚本记录');\nconst productId = linkIds(script.fields['关联产品'])[0];\nconst hookId = linkIds(script.fields['关联Hook'])[0];\nif (!productId || !hookId) throw new Error('脚本缺少产品或 Hook 关联');\nconst product = await getRecord(token, PRODUCT_TABLE, productId);\nconst videoId = await createRecord(token, VIDEO_TABLE, {\n  '视频标题': String(textCell(script.fields['脚本标题']) || 'UGC视频任务').slice(0, 100),\n  '产品链接': urlValue(urlCell(product.fields['产品链接'])),\n  '视频状态': '待补素材',\n  '语言': firstSelect(script.fields['语言']) || '中文',\n  '产品图URL': urlValue(urlCell(product.fields['产品主图URL'])),\n  '产品图来源说明': '默认带入产品主图；可在视频任务中上传附件或替换 URL。',\n  '关联产品': [productId],\n  '关联Hook': [hookId],\n  '关联脚本': [scriptRecordId],\n});\nawait updateRecord(token, SCRIPT_TABLE, scriptRecordId, { '确认状态': '已确认' });\nreturn [{ json: { message: 'Video task created', scriptRecordId, videoId } }];\n"
+      },
+      "id": "9235fa2c-e4a2-404e-ab90-e0ae01775efe"
+    }
+  ],
+  "connections": {
+    "Webhook: Create Video Task": {
+      "main": [
+        [
+          {
+            "node": "Create video task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "activeVersionId": "bd3be4dc-b349-4f0e-860c-1ae578c55896",
+  "versionCounter": 15,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-05-20T04:02:15.743Z",
+      "createdAt": "2026-05-20T04:02:15.743Z",
+      "role": "workflow:owner",
+      "workflowId": "MIsclQV7O1B8HOhh",
+      "projectId": "jHhLQ3oygEhG0Lcr",
+      "project": {
+        "updatedAt": "2026-05-12T15:46:04.393Z",
+        "createdAt": "2026-05-12T11:35:09.539Z",
+        "id": "jHhLQ3oygEhG0Lcr",
+        "name": "Yueying Wu <shellyying950526@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "5aa488b4-77bf-43f0-82bd-3daccdaa2b29"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-05-20T04:38:08.102Z",
+    "createdAt": "2026-05-20T04:38:08.102Z",
+    "versionId": "bd3be4dc-b349-4f0e-860c-1ae578c55896",
+    "workflowId": "MIsclQV7O1B8HOhh",
+    "nodes": [
+      {
+        "name": "Webhook: Create Video Task",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "path": "final-create-video-task",
+          "httpMethod": "GET",
+          "responseMode": "lastNode",
+          "options": {}
+        },
+        "id": "a82d2249-3bd3-4cf1-97d7-fc275a54cda7",
+        "webhookId": "345487dc-4ee2-4190-b7fd-743db798aa13"
+      },
+      {
+        "name": "Create video task",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          300,
+          0
+        ],
+        "parameters": {
+          "language": "javaScript",
+          "jsCode": "\n\nconst APP_TOKEN = \"YOUR_FEISHU_BASE_TOKEN\";\nconst PRODUCT_TABLE = \"YOUR_PRODUCT_TABLE_ID\";\nconst HOOK_TABLE = \"YOUR_HOOK_TABLE_ID\";\nconst SCRIPT_TABLE = \"YOUR_SCRIPT_TABLE_ID\";\nconst VIDEO_TABLE = \"YOUR_VIDEO_TABLE_ID\";\nconst SETTINGS_TABLE = 'YOUR_OPTIONAL_SETTINGS_TABLE_ID';\nconst FEISHU_APP_ID = 'YOUR_FEISHU_APP_ID';\nconst FEISHU_APP_SECRET = String($env.FEISHU_APP_SECRET || '');\nconst NL = String.fromCharCode(10);\nconst httpRequest = (options) => this.helpers.httpRequest(options);\n\nasync function requestJson(options, label) {\n  const response = await httpRequest({\n    ...options,\n    json: true,\n    simple: false,\n    resolveWithFullResponse: true,\n    timeout: options.timeout || 120000,\n  });\n  const statusCode = response.statusCode || response.status || 200;\n  const body = response.body ?? response;\n  if (statusCode < 200 || statusCode >= 300) {\n    throw new Error(label + ' HTTP ' + statusCode + ': ' + JSON.stringify(body).slice(0, 1000));\n  }\n  return body;\n}\n\nasync function feishuToken() {\n  const res = await requestJson({\n    method: 'POST',\n    url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',\n    headers: { 'Content-Type': 'application/json' },\n    body: { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET },\n  }, '飞书取 token');\n  if (!res.tenant_access_token) throw new Error('飞书 token 为空。');\n  return res.tenant_access_token;\n}\n\nasync function getRecord(token, tableId, recordId) {\n  const res = await requestJson({\n    method: 'GET',\n    url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId,\n    headers: { Authorization: 'Bearer ' + token },\n  }, '飞书读记录');\n  return res?.data?.record;\n}\n\nasync function listRecords(token, tableId, pageSize = 100) {\n  const res = await requestJson({\n    method: 'GET',\n    url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize,\n    headers: { Authorization: 'Bearer ' + token },\n  }, '飞书列记录');\n  return res?.data?.items || [];\n}\n\nasync function updateRecord(token, tableId, recordId, fields) {\n  await requestJson({\n    method: 'PUT',\n    url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId,\n    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' },\n    body: { fields },\n  }, '飞书更新记录');\n}\n\nasync function createRecord(token, tableId, fields) {\n  const res = await requestJson({\n    method: 'POST',\n    url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records',\n    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' },\n    body: { fields },\n  }, '飞书创建记录');\n  const id = res?.data?.record?.record_id;\n  if (!id) throw new Error('飞书创建记录无 record_id: ' + JSON.stringify(res).slice(0, 800));\n  return id;\n}\n\nasync function batchCreate(token, tableId, records) {\n  if (!records.length) return [];\n  const res = await requestJson({\n    method: 'POST',\n    url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/batch_create',\n    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' },\n    body: { records },\n  }, '飞书批量创建记录');\n  return res?.data?.records || [];\n}\n\nfunction firstSelect(value) {\n  if (Array.isArray(value)) return String(value[0]?.text || value[0]?.name || value[0] || '');\n  return String(value || '');\n}\n\nfunction textCell(value) {\n  if (Array.isArray(value)) return value.map((x) => x?.text || x?.name || x).join('');\n  if (value && typeof value === 'object') return value.text || value.link || '';\n  return String(value || '');\n}\n\nfunction urlCell(value) {\n  if (Array.isArray(value)) return value[0]?.link || value[0]?.text || '';\n  if (value && typeof value === 'object') return value.link || value.text || '';\n  return String(value || '');\n}\n\nfunction linkIds(value) {\n  if (!Array.isArray(value)) return [];\n  return value.map((x) => x?.record_id || x?.id || x?.record_ids?.[0] || x).filter(Boolean);\n}\n\nfunction extractJson(text) {\n  if (typeof text !== 'string') return text;\n  const cleaned = text.replace(/^\\s*\\`\\`\\`(?:json)?/i, '').replace(/\\`\\`\\`\\s*$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch {}\n  const first = cleaned.indexOf('{');\n  const last = cleaned.lastIndexOf('}');\n  if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));\n  throw new Error('无法解析 JSON: ' + cleaned.slice(0, 500));\n}\n\nasync function getModelConfig(token) {\n  const rows = await listRecords(token, SETTINGS_TABLE, 20);\n  const enabled = rows.find((r) => firstSelect(r.fields['是否启用']) === '是') || rows[0];\n  const provider = firstSelect(enabled?.fields?.['LLM Provider']) || 'DeepSeek';\n  const model = textCell(enabled?.fields?.['模型名称']) || 'deepseek-chat';\n  const baseUrl = urlCell(enabled?.fields?.['OpenAI兼容Base URL']) || 'https://api.deepseek.com';\n  let key = '';\n    if (provider === 'DeepSeek') key = String($env.DEEPSEEK_API_KEY || '').trim();\n  if (provider === 'OpenAI') key = String($env.OPENAI_API_KEY || '').trim();\n  if (!key) throw new Error('缺少 ' + provider + ' API key，请在 n8n .env / credential 中配置。');\n  return { provider, model, baseUrl: baseUrl.replace(/\\/$/, ''), key };\n}\n\nasync function llm(token, system, user, { json = false, temperature = 0.55, maxTokens = 5000 } = {}) {\n  const cfg = await getModelConfig(token);\n  const body = {\n    model: cfg.model,\n    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],\n    temperature,\n    max_tokens: maxTokens,\n  };\n  if (json) body.response_format = { type: 'json_object' };\n  const response = await requestJson({\n    method: 'POST',\n    url: cfg.baseUrl + '/chat/completions',\n    headers: { Authorization: 'Bearer ' + cfg.key, 'Content-Type': 'application/json' },\n    body,\n  }, cfg.provider + ' LLM');\n  const content = response?.choices?.[0]?.message?.content;\n  if (!content) throw new Error(cfg.provider + ' 返回空内容: ' + JSON.stringify(response).slice(0, 600));\n  if (!json) return { text: String(content).trim(), config: cfg };\n  try {\n    return { json: extractJson(content), config: cfg };\n  } catch (error) {\n    const repair = await requestJson({\n      method: 'POST',\n      url: cfg.baseUrl + '/chat/completions',\n      headers: { Authorization: 'Bearer ' + cfg.key, 'Content-Type': 'application/json' },\n      body: {\n        model: cfg.model,\n        messages: [\n          { role: 'system', content: 'You repair malformed JSON. Return only valid JSON. Do not explain.' },\n          { role: 'user', content: 'Repair this into valid JSON:\\n\\n' + content },\n        ],\n        temperature: 0,\n        max_tokens: maxTokens,\n        response_format: { type: 'json_object' },\n      },\n    }, cfg.provider + ' JSON repair');\n    return { json: extractJson(repair?.choices?.[0]?.message?.content || ''), config: cfg };\n  }\n}\n\nfunction productBriefFromFields(fields) {\n  return {\n    source_url: urlCell(fields['产品链接']),\n    product_name: textCell(fields['产品名称']),\n    brand_name: textCell(fields['品牌名']),\n    category: textCell(fields['品类']),\n    price_info: textCell(fields['价格信息']),\n    product_main_image_url: urlCell(fields['产品主图URL']),\n    core_functions: textCell(fields['核心功能']),\n    materials_ingredients_technology: textCell(fields['材质成分技术']),\n    specs_parameters: textCell(fields['规格参数']),\n    usage_method: textCell(fields['使用方法']),\n    usage_scenarios: textCell(fields['适用场景']),\n    core_selling_points: textCell(fields['核心卖点']),\n    unique_mechanism: textCell(fields['独特机制']),\n    differentiation: textCell(fields['差异化优势']),\n    core_transformation: textCell(fields['核心蜕变']),\n    proof_points: textCell(fields['证据背书']),\n    target_audience: textCell(fields['目标人群']),\n    user_persona: textCell(fields['使用者画像']),\n    buyer_persona: textCell(fields['购买者画像']),\n    visceral_pain_points: textCell(fields['刺骨痛点']),\n    emotional_triggers: textCell(fields['情绪触发器']),\n    buyer_objections: textCell(fields['购买阻力']),\n    awareness_stage: firstSelect(fields['认知阶段']),\n    visual_hook_elements: textCell(fields['视觉抓手']),\n    offer_promo_guarantee: textCell(fields['优惠促销保障']),\n    recommended_hook_categories: textCell(fields['推荐Hook分类']),\n    risk_constraints: textCell(fields['禁说内容风险点']),\n    manual_notes: textCell(fields['用户手动备注']),\n  };\n}\n\nfunction urlValue(url) {\n  return url ? { text: url, link: url } : null;\n}\n\nfunction parseResultUrls(resultJson) {\n  if (!resultJson) return [];\n  let parsed = resultJson;\n  if (typeof parsed === 'string') {\n    try { parsed = JSON.parse(parsed); } catch { return []; }\n  }\n  const candidates = [parsed.resultUrls, parsed.result_urls, parsed.urls, parsed.imageUrls, parsed.videoUrls];\n  for (const c of candidates) if (Array.isArray(c) && c.length) return c.map(String);\n  if (typeof parsed.url === 'string') return [parsed.url];\n  return [];\n}\n\nconst query = $('Webhook: Create Video Task').first().json.query || {};\nconst scriptRecordId = String(query.script_record_id || '').trim();\nif (!scriptRecordId) throw new Error('缺少 script_record_id');\nconst token = await feishuToken();\nconst script = await getRecord(token, SCRIPT_TABLE, scriptRecordId);\nif (!script) throw new Error('找不到脚本记录');\nconst productId = linkIds(script.fields['关联产品'])[0];\nconst hookId = linkIds(script.fields['关联Hook'])[0];\nif (!productId || !hookId) throw new Error('脚本缺少产品或 Hook 关联');\nconst product = await getRecord(token, PRODUCT_TABLE, productId);\nconst videoId = await createRecord(token, VIDEO_TABLE, {\n  '视频标题': String(textCell(script.fields['脚本标题']) || 'UGC视频任务').slice(0, 100),\n  '产品链接': urlValue(urlCell(product.fields['产品链接'])),\n  '视频状态': '待补素材',\n  '语言': firstSelect(script.fields['语言']) || '中文',\n  '产品图URL': urlValue(urlCell(product.fields['产品主图URL'])),\n  '产品图来源说明': '默认带入产品主图；可在视频任务中上传附件或替换 URL。',\n  '关联产品': [productId],\n  '关联Hook': [hookId],\n  '关联脚本': [scriptRecordId],\n});\nawait updateRecord(token, SCRIPT_TABLE, scriptRecordId, { '确认状态': '已确认' });\nreturn [{ json: { message: 'Video task created', scriptRecordId, videoId } }];\n"
+        },
+        "id": "9235fa2c-e4a2-404e-ab90-e0ae01775efe"
+      }
+    ],
+    "connections": {
+      "Webhook: Create Video Task": {
+        "main": [
+          [
+            {
+              "node": "Create video task",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Yueying Wu",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-05-20T04:38:08.146Z",
+        "id": 173,
+        "workflowId": "MIsclQV7O1B8HOhh",
+        "versionId": "bd3be4dc-b349-4f0e-860c-1ae578c55896",
+        "event": "activated",
+        "userId": "5aa488b4-77bf-43f0-82bd-3daccdaa2b29"
+      },
+      {
+        "createdAt": "2026-05-22T09:04:33.547Z",
+        "id": 264,
+        "workflowId": "MIsclQV7O1B8HOhh",
+        "versionId": "bd3be4dc-b349-4f0e-860c-1ae578c55896",
+        "event": "activated",
+        "userId": "5aa488b4-77bf-43f0-82bd-3daccdaa2b29"
+      },
+      {
+        "createdAt": "2026-05-20T04:38:08.133Z",
+        "id": 172,
+        "workflowId": "MIsclQV7O1B8HOhh",
+        "versionId": "bd3be4dc-b349-4f0e-860c-1ae578c55896",
+        "event": "deactivated",
+        "userId": "5aa488b4-77bf-43f0-82bd-3daccdaa2b29"
+      },
+      {
+        "createdAt": "2026-05-22T09:04:33.528Z",
+        "id": 263,
+        "workflowId": "MIsclQV7O1B8HOhh",
+        "versionId": "bd3be4dc-b349-4f0e-860c-1ae578c55896",
+        "event": "deactivated",
+        "userId": "5aa488b4-77bf-43f0-82bd-3daccdaa2b29"
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+node_modules
+.next
+out
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+.claude/
+backups/
+demo_assets/
+docs/INTERVIEW_CASE.md
+config/final_base_config.json
+
+/*.md
+!/README.md
+
+AGENTS.md
+CLAUDE.md
+BACKLOG.md
+CHANGELOG.md
+PRD_终版.md
+How to make killer performance ads-20260513033901.md
+/scripts/
+
+npm-debug.log*

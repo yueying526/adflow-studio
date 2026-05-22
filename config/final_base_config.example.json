@@ -1,0 +1,49 @@
+{
+  "baseToken": "YOUR_FEISHU_BASE_TOKEN",
+  "baseUrl": "https://your-domain.feishu.cn/base/YOUR_FEISHU_BASE_TOKEN",
+  "feishuAppId": "YOUR_FEISHU_APP_ID",
+  "permissionGrant": {
+    "status": "template",
+    "message": "Copy this file to final_base_config.json and fill your Feishu Base/table IDs."
+  },
+  "tables": {
+    "product": {
+      "id": "YOUR_PRODUCT_TABLE_ID",
+      "name": "产品工作台"
+    },
+    "hook": {
+      "id": "YOUR_HOOK_TABLE_ID",
+      "name": "Hook角度池"
+    },
+    "script": {
+      "id": "YOUR_SCRIPT_TABLE_ID",
+      "name": "脚本工作台"
+    },
+    "video": {
+      "id": "YOUR_VIDEO_TABLE_ID",
+      "name": "视频任务"
+    }
+  },
+  "workflows": {
+    "generateHooks": {
+      "id": "YOUR_N8N_GENERATE_HOOKS_WORKFLOW_ID",
+      "name": "产品生成Hook v1",
+      "webhook": "http://localhost:5678/webhook/final-generate-hooks"
+    },
+    "generateScript": {
+      "id": "YOUR_N8N_GENERATE_SCRIPT_WORKFLOW_ID",
+      "name": "Hook生成脚本 v1",
+      "webhook": "http://localhost:5678/webhook/final-generate-script"
+    },
+    "createVideoTask": {
+      "id": "YOUR_N8N_CREATE_VIDEO_TASK_WORKFLOW_ID",
+      "name": "脚本创建视频任务 v1",
+      "webhook": "http://localhost:5678/webhook/final-create-video-task"
+    },
+    "generateVideo": {
+      "id": "YOUR_N8N_GENERATE_VIDEO_WORKFLOW_ID",
+      "name": "UGC生成视频 v1",
+      "webhook": "http://localhost:5678/webhook/final-generate-video"
+    }
+  }
+}

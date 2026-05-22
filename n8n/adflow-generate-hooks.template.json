@@ -1,0 +1,803 @@
+{
+  "name": "产品生成Hook template",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "name": "Webhook: Generate Hooks",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "path": "final-generate-hooks",
+        "httpMethod": "GET",
+        "responseMode": "onReceived",
+        "responseData": "firstEntryJson",
+        "options": {
+          "responseCode": 200,
+          "responseData": "任务已开始，请回到前端等待自动刷新。"
+        }
+      },
+      "id": "dd811600-da55-4ef1-8c3e-9783dfe5c28d",
+      "webhookId": "04d2dc55-48f5-4fce-be2f-ac5dfd98048c"
+    },
+    {
+      "name": "Load product for Firecrawl",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "\n\nconst APP_TOKEN = \"YOUR_FEISHU_BASE_TOKEN\";\nconst PRODUCT_TABLE = \"YOUR_PRODUCT_TABLE_ID\";\nconst HOOK_TABLE = \"YOUR_HOOK_TABLE_ID\";\nconst FEISHU_APP_ID = 'YOUR_FEISHU_APP_ID';\nconst FEISHU_APP_SECRET = String($env.FEISHU_APP_SECRET || '');\nconst httpRequest = (options) => this.helpers.httpRequest(options);\nasync function requestJson(options, label) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const response = await httpRequest({ ...options, json: true, simple: false, resolveWithFullResponse: true, timeout: options.timeout || 120000 });\n      const statusCode = response.statusCode || response.status || 200;\n      const body = response.body ?? response;\n      if (statusCode < 200 || statusCode >= 300) throw new Error(label + ' HTTP ' + statusCode + ': ' + JSON.stringify(body).slice(0, 1000));\n      return body;\n    } catch (error) {\n      lastError = error;\n      const message = String(error?.message || error || '');\n      const responseBody = error?.response?.body || error?.response?.data || {};\n      const responseText = JSON.stringify(responseBody);\n      const transient = responseBody?.code === 1254607\n        || responseText.includes('1254607')\n        || message.includes('1254607')\n        || message.includes('Client network socket disconnected')\n        || message.includes('socket hang up')\n        || message.includes('ECONNRESET')\n        || message.includes('ETIMEDOUT')\n        || message.includes('EAI_AGAIN')\n        || message.includes('HTTP 500')\n        || message.includes('HTTP 502')\n        || message.includes('HTTP 503')\n        || message.includes('HTTP 504');\n      if (!transient || attempt >= 4) throw error;\n      await sleep(2000 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function feishuToken() {\n  const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', headers: { 'Content-Type': 'application/json' }, body: { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET } }, '飞书取 token');\n  return res.tenant_access_token;\n}\nfunction isFeishuNotReady(error) {\n  const message = String(error?.message || error || '');\n  return message.includes('1254607')\n    || message.includes('Client network socket disconnected')\n    || message.includes('socket hang up')\n    || message.includes('ECONNRESET')\n    || message.includes('ETIMEDOUT')\n    || message.includes('EAI_AGAIN');\n}\nasync function withFeishuRetry(operation, label, attempts = 5) {\n  let lastError;\n  for (let attempt = 1; attempt <= attempts; attempt++) {\n    try {\n      return await operation();\n    } catch (error) {\n      lastError = error;\n      if (!isFeishuNotReady(error) || attempt >= attempts) throw error;\n      await sleep(1500 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function getRecord(token, tableId, recordId) {\n  try {\n    return await withFeishuRetry(async () => {\n      const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token } }, '飞书读记录');\n      return res?.data?.record;\n    }, '飞书读记录', 6);\n  } catch (error) {\n    const records = await listRecords(token, tableId, 200);\n    const fallback = records.find((record) => record.record_id === recordId);\n    if (fallback) return fallback;\n    throw error;\n  }\n}\nasync function listRecords(token, tableId, pageSize = 200) {\n  return await withFeishuRetry(async () => {\n    const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize, headers: { Authorization: 'Bearer ' + token } }, '飞书列记录');\n    return res?.data?.items || [];\n  }, '飞书列记录');\n}\nasync function optionalListRecords(token, tableId, pageSize = 200) {\n  try {\n    return await listRecords(token, tableId, pageSize);\n  } catch {\n    return [];\n  }\n}\nasync function updateRecord(token, tableId, recordId, fields) {\n  await withFeishuRetry(async () => {\n    await requestJson({ method: 'PUT', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { fields } }, '飞书更新记录');\n  }, '飞书更新记录');\n}\nasync function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }\nasync function batchCreate(token, tableId, records) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/batch_create', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { records } }, '飞书批量创建');\n      return res?.data?.records || [];\n    } catch (error) {\n      lastError = error;\n      if (!String(error.message || error).includes('1254607') || attempt >= 4) throw error;\n      await sleep(2500 * attempt);\n    }\n  }\n  throw lastError;\n}\nfunction firstSelect(value) { return Array.isArray(value) ? String(value[0]?.text || value[0]?.name || value[0] || '') : String(value || ''); }\nfunction textCell(value) { if (Array.isArray(value)) return value.map((x) => x?.text || x?.name || x).join(''); if (value && typeof value === 'object') return value.text || value.link || ''; return String(value || ''); }\nfunction urlCell(value) { if (Array.isArray(value)) return value[0]?.link || value[0]?.text || ''; if (value && typeof value === 'object') return value.link || value.text || ''; return String(value || ''); }\nfunction linkIds(value) { return Array.isArray(value) ? value.map((x) => x?.record_id || x?.id || x?.record_ids?.[0] || x).filter(Boolean) : []; }\nfunction urlValue(url) { return url ? { text: url, link: url } : null; }\nfunction parseJson(input) {\n  if (input && typeof input === 'object' && !input.text && !input.output) return input;\n  const raw = String(input?.text || input?.output || input?.response || '');\n  const cleaned = raw.replace(/^\\s*\\`\\`\\`(?:json)?/i, '').replace(/\\`\\`\\`\\s*$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch {}\n  const first = cleaned.indexOf('{'); const last = cleaned.lastIndexOf('}');\n  if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));\n  throw new Error('无法解析 JSON: ' + cleaned.slice(0, 500));\n}\nfunction productBriefFromFields(fields) {\n  return {\n    source_url: urlCell(fields['产品链接']), product_name: textCell(fields['产品名称']), brand_name: textCell(fields['品牌名']), category: textCell(fields['品类']), price_info: textCell(fields['价格信息']), product_main_image_url: urlCell(fields['产品主图URL']),\n    core_functions: textCell(fields['核心功能']), materials_ingredients_technology: textCell(fields['材质成分技术']), specs_parameters: textCell(fields['规格参数']), usage_method: textCell(fields['使用方法']), usage_scenarios: textCell(fields['适用场景']),\n    core_selling_points: textCell(fields['核心卖点']), unique_mechanism: textCell(fields['独特机制']), differentiation: textCell(fields['差异化优势']), core_transformation: textCell(fields['核心蜕变']), proof_points: textCell(fields['证据背书']),\n    target_audience: textCell(fields['目标人群']), user_persona: textCell(fields['使用者画像']), buyer_persona: textCell(fields['购买者画像']), visceral_pain_points: textCell(fields['刺骨痛点']), emotional_triggers: textCell(fields['情绪触发器']), buyer_objections: textCell(fields['购买阻力']),\n    visual_hook_elements: textCell(fields['视觉抓手']), offer_promo_guarantee: textCell(fields['优惠促销保障']), recommended_hook_categories: textCell(fields['推荐Hook分类']), risk_constraints: textCell(fields['禁说内容风险点']), manual_notes: textCell(fields['用户手动备注'])\n  };\n}\n\nconst query = $input.first().json.query || {};\nconst productRecordId = String(query.product_record_id || '').trim();\nconst mode = String(query.mode || 'brief_only').trim();\nif (!productRecordId) throw new Error('缺少 product_record_id');\nconst token = await feishuToken();\nconst product = await getRecord(token, PRODUCT_TABLE, productRecordId);\nif (!product) throw new Error('找不到产品记录');\nconst productUrl = urlCell(product.fields['产品链接']);\nif (!productUrl) throw new Error('产品链接为空');\nawait updateRecord(token, PRODUCT_TABLE, productRecordId, { '状态': mode === 'hooks_only' ? '生成中' : '生成中', '错误信息': '' });\nreturn [{ json: { productRecordId, mode, productUrl } }];\n"
+      },
+      "id": "3f729940-73c2-41a2-a1c2-5bc6e27019bc"
+    },
+    {
+      "name": "Mode is hooks only?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "mode-hooks-only",
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "hooks_only",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "71b15522-a00a-45c2-aa67-7d237720de9e"
+    },
+    {
+      "name": "Firecrawl scrape",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        140
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "q0u26QvlaaLRDpC7",
+          "name": "Firecrawl"
+        }
+      },
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.firecrawl.dev/v1/scrape",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"{{ $json.productUrl }}\",\n  \"formats\": [\"markdown\"],\n  \"onlyMainContent\": true,\n  \"waitFor\": 2000\n}",
+        "options": {
+          "response": {
+            "neverError": true
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "3977ec8b-e74f-4a2b-9836-533b4c5a1641"
+    },
+    {
+      "name": "Prepare product brief input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        140
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "\nconst previous = $('Load product for Firecrawl').first().json;\nconst firecrawl = $input.first().json || {};\nconst pageContent = String(firecrawl?.data?.markdown || firecrawl?.data?.content || firecrawl?.markdown || firecrawl?.content || '').slice(0, 12000);\nconst meta = firecrawl?.data?.metadata || firecrawl?.metadata || {};\nconst image = meta.ogImage || meta.image || '';\nif (!pageContent) throw new Error('抓取结果没有正文。');\nreturn [{ json: { ...previous, pageContent, scrapedImage: image } }];\n"
+      },
+      "id": "e4c9ad40-58f9-464d-8967-58fc2a9c0f1d"
+    },
+    {
+      "name": "DeepSeek Product Brief",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1300,
+        140
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "=请输出 json。\\nsource_url: {{ $json.productUrl }}\\n\\npage_content:\\n{{ $json.pageContent }}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "你是一位资深电商广告策略师、消费者研究员和短视频创意总监。你的任务是从产品页面抓取文本中，生成一份可被人工修改、并能驱动 Hook、脚本和 UGC 视频生成的【产品策略简报】。\n\n## 输入\n你会收到：\n- source_url：产品链接\n- page_content：抓取到的产品页面文本\n\n## 输出规则\n- 严格只返回合法 JSON，不要 Markdown，不要解释。\n- 所有字段都要尽量具体，能直接指导短视频创意。\n- 如果页面没写清楚，可以基于品类常识推断，但需要在 `manual_notes` 或相关字段里标注“推断”。\n- 不要夸大医疗、功效、收益承诺；只使用页面事实和合理营销表达。\n- 不要输出产品级 `awareness_stage`。认知阶段应在 Hook 生成时按每条 Hook 的角度单独判断。\n\n## 输出 JSON 字段\n{\n  \"source_url\": \"\",\n  \"product_name\": \"\",\n  \"brand_name\": \"\",\n  \"category\": \"\",\n  \"price_info\": \"\",\n  \"product_main_image_url\": \"\",\n  \"core_functions\": \"\",\n  \"materials_ingredients_technology\": \"\",\n  \"specs_parameters\": \"\",\n  \"usage_method\": \"\",\n  \"usage_scenarios\": \"\",\n  \"core_selling_points\": \"\",\n  \"unique_mechanism\": \"\",\n  \"differentiation\": \"\",\n  \"core_transformation\": \"\",\n  \"proof_points\": \"\",\n  \"target_audience\": \"\",\n  \"user_persona\": \"\",\n  \"buyer_persona\": \"\",\n  \"visceral_pain_points\": \"\",\n  \"emotional_triggers\": \"\",\n  \"buyer_objections\": \"\",\n  \"visual_hook_elements\": \"\",\n  \"offer_promo_guarantee\": \"\",\n  \"recommended_hook_categories\": \"\",\n  \"risk_constraints\": \"\",\n  \"manual_notes\": \"\"\n}\n"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "51742b30-f0dc-4f24-8718-229d64f5bd68"
+    },
+    {
+      "name": "DeepSeek Product Brief Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        1300,
+        360
+      ],
+      "parameters": {
+        "model": "deepseek-chat",
+        "options": {
+          "temperature": 0.2,
+          "responseFormat": "json_object",
+          "timeout": 180000,
+          "maxTokens": 6000
+        }
+      },
+      "credentials": {
+        "deepSeekApi": {
+          "id": "hrqsFWPtR87WzqHs",
+          "name": "DeepSeek"
+        }
+      },
+      "id": "73b0b626-2367-4aaa-a91f-9a7114a1da13"
+    },
+    {
+      "name": "Write product brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        140
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "\n\nconst APP_TOKEN = \"YOUR_FEISHU_BASE_TOKEN\";\nconst PRODUCT_TABLE = \"YOUR_PRODUCT_TABLE_ID\";\nconst HOOK_TABLE = \"YOUR_HOOK_TABLE_ID\";\nconst FEISHU_APP_ID = 'YOUR_FEISHU_APP_ID';\nconst FEISHU_APP_SECRET = String($env.FEISHU_APP_SECRET || '');\nconst httpRequest = (options) => this.helpers.httpRequest(options);\nasync function requestJson(options, label) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const response = await httpRequest({ ...options, json: true, simple: false, resolveWithFullResponse: true, timeout: options.timeout || 120000 });\n      const statusCode = response.statusCode || response.status || 200;\n      const body = response.body ?? response;\n      if (statusCode < 200 || statusCode >= 300) throw new Error(label + ' HTTP ' + statusCode + ': ' + JSON.stringify(body).slice(0, 1000));\n      return body;\n    } catch (error) {\n      lastError = error;\n      const message = String(error?.message || error || '');\n      const responseBody = error?.response?.body || error?.response?.data || {};\n      const responseText = JSON.stringify(responseBody);\n      const transient = responseBody?.code === 1254607\n        || responseText.includes('1254607')\n        || message.includes('1254607')\n        || message.includes('Client network socket disconnected')\n        || message.includes('socket hang up')\n        || message.includes('ECONNRESET')\n        || message.includes('ETIMEDOUT')\n        || message.includes('EAI_AGAIN')\n        || message.includes('HTTP 500')\n        || message.includes('HTTP 502')\n        || message.includes('HTTP 503')\n        || message.includes('HTTP 504');\n      if (!transient || attempt >= 4) throw error;\n      await sleep(2000 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function feishuToken() {\n  const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', headers: { 'Content-Type': 'application/json' }, body: { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET } }, '飞书取 token');\n  return res.tenant_access_token;\n}\nfunction isFeishuNotReady(error) {\n  const message = String(error?.message || error || '');\n  return message.includes('1254607')\n    || message.includes('Client network socket disconnected')\n    || message.includes('socket hang up')\n    || message.includes('ECONNRESET')\n    || message.includes('ETIMEDOUT')\n    || message.includes('EAI_AGAIN');\n}\nasync function withFeishuRetry(operation, label, attempts = 5) {\n  let lastError;\n  for (let attempt = 1; attempt <= attempts; attempt++) {\n    try {\n      return await operation();\n    } catch (error) {\n      lastError = error;\n      if (!isFeishuNotReady(error) || attempt >= attempts) throw error;\n      await sleep(1500 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function getRecord(token, tableId, recordId) {\n  try {\n    return await withFeishuRetry(async () => {\n      const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token } }, '飞书读记录');\n      return res?.data?.record;\n    }, '飞书读记录', 6);\n  } catch (error) {\n    const records = await listRecords(token, tableId, 200);\n    const fallback = records.find((record) => record.record_id === recordId);\n    if (fallback) return fallback;\n    throw error;\n  }\n}\nasync function listRecords(token, tableId, pageSize = 200) {\n  return await withFeishuRetry(async () => {\n    const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize, headers: { Authorization: 'Bearer ' + token } }, '飞书列记录');\n    return res?.data?.items || [];\n  }, '飞书列记录');\n}\nasync function optionalListRecords(token, tableId, pageSize = 200) {\n  try {\n    return await listRecords(token, tableId, pageSize);\n  } catch {\n    return [];\n  }\n}\nasync function updateRecord(token, tableId, recordId, fields) {\n  await withFeishuRetry(async () => {\n    await requestJson({ method: 'PUT', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { fields } }, '飞书更新记录');\n  }, '飞书更新记录');\n}\nasync function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }\nasync function batchCreate(token, tableId, records) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/batch_create', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { records } }, '飞书批量创建');\n      return res?.data?.records || [];\n    } catch (error) {\n      lastError = error;\n      if (!String(error.message || error).includes('1254607') || attempt >= 4) throw error;\n      await sleep(2500 * attempt);\n    }\n  }\n  throw lastError;\n}\nfunction firstSelect(value) { return Array.isArray(value) ? String(value[0]?.text || value[0]?.name || value[0] || '') : String(value || ''); }\nfunction textCell(value) { if (Array.isArray(value)) return value.map((x) => x?.text || x?.name || x).join(''); if (value && typeof value === 'object') return value.text || value.link || ''; return String(value || ''); }\nfunction urlCell(value) { if (Array.isArray(value)) return value[0]?.link || value[0]?.text || ''; if (value && typeof value === 'object') return value.link || value.text || ''; return String(value || ''); }\nfunction linkIds(value) { return Array.isArray(value) ? value.map((x) => x?.record_id || x?.id || x?.record_ids?.[0] || x).filter(Boolean) : []; }\nfunction urlValue(url) { return url ? { text: url, link: url } : null; }\nfunction parseJson(input) {\n  if (input && typeof input === 'object' && !input.text && !input.output) return input;\n  const raw = String(input?.text || input?.output || input?.response || '');\n  const cleaned = raw.replace(/^\\s*\\`\\`\\`(?:json)?/i, '').replace(/\\`\\`\\`\\s*$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch {}\n  const first = cleaned.indexOf('{'); const last = cleaned.lastIndexOf('}');\n  if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));\n  throw new Error('无法解析 JSON: ' + cleaned.slice(0, 500));\n}\nfunction productBriefFromFields(fields) {\n  return {\n    source_url: urlCell(fields['产品链接']), product_name: textCell(fields['产品名称']), brand_name: textCell(fields['品牌名']), category: textCell(fields['品类']), price_info: textCell(fields['价格信息']), product_main_image_url: urlCell(fields['产品主图URL']),\n    core_functions: textCell(fields['核心功能']), materials_ingredients_technology: textCell(fields['材质成分技术']), specs_parameters: textCell(fields['规格参数']), usage_method: textCell(fields['使用方法']), usage_scenarios: textCell(fields['适用场景']),\n    core_selling_points: textCell(fields['核心卖点']), unique_mechanism: textCell(fields['独特机制']), differentiation: textCell(fields['差异化优势']), core_transformation: textCell(fields['核心蜕变']), proof_points: textCell(fields['证据背书']),\n    target_audience: textCell(fields['目标人群']), user_persona: textCell(fields['使用者画像']), buyer_persona: textCell(fields['购买者画像']), visceral_pain_points: textCell(fields['刺骨痛点']), emotional_triggers: textCell(fields['情绪触发器']), buyer_objections: textCell(fields['购买阻力']),\n    visual_hook_elements: textCell(fields['视觉抓手']), offer_promo_guarantee: textCell(fields['优惠促销保障']), recommended_hook_categories: textCell(fields['推荐Hook分类']), risk_constraints: textCell(fields['禁说内容风险点']), manual_notes: textCell(fields['用户手动备注'])\n  };\n}\n\nconst base = $('Prepare product brief input').first().json;\nconst token = await feishuToken();\nconst product = await getRecord(token, PRODUCT_TABLE, base.productRecordId);\nlet brief = { ...productBriefFromFields(product.fields), ...parseJson($input.first().json) };\nif (!brief.product_main_image_url) brief.product_main_image_url = base.scrapedImage || '';\nawait updateRecord(token, PRODUCT_TABLE, base.productRecordId, {\n  '产品名称': brief.product_name || '', '品牌名': brief.brand_name || '', '品类': brief.category || '', '价格信息': brief.price_info || '',\n  '产品主图URL': urlValue(brief.product_main_image_url), '核心功能': brief.core_functions || '', '材质成分技术': brief.materials_ingredients_technology || '', '规格参数': brief.specs_parameters || '',\n  '使用方法': brief.usage_method || '', '适用场景': brief.usage_scenarios || '', '核心卖点': brief.core_selling_points || '', '独特机制': brief.unique_mechanism || '',\n  '差异化优势': brief.differentiation || '', '核心蜕变': brief.core_transformation || '', '证据背书': brief.proof_points || '', '目标人群': brief.target_audience || '',\n  '使用者画像': brief.user_persona || '', '购买者画像': brief.buyer_persona || '', '刺骨痛点': brief.visceral_pain_points || '', '情绪触发器': brief.emotional_triggers || '',\n  '购买阻力': brief.buyer_objections || '', '视觉抓手': brief.visual_hook_elements || '', '优惠促销保障': brief.offer_promo_guarantee || '',\n  '推荐Hook分类': brief.recommended_hook_categories || '', '禁说内容风险点': brief.risk_constraints || '', '用户手动备注': brief.manual_notes || '', '原始抓取内容': base.pageContent.slice(0, 3000)\n});\nawait updateRecord(token, PRODUCT_TABLE, base.productRecordId, { '状态': '已生成', '错误信息': '' });\nreturn [{ json: { message: 'Product brief generated', productRecordId: base.productRecordId } }];\n"
+      },
+      "id": "70a2dd46-33b3-4556-8aa1-10216de377b4"
+    },
+    {
+      "name": "Prepare hooks from product",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "\n\nconst APP_TOKEN = \"YOUR_FEISHU_BASE_TOKEN\";\nconst PRODUCT_TABLE = \"YOUR_PRODUCT_TABLE_ID\";\nconst HOOK_TABLE = \"YOUR_HOOK_TABLE_ID\";\nconst FEISHU_APP_ID = 'YOUR_FEISHU_APP_ID';\nconst FEISHU_APP_SECRET = String($env.FEISHU_APP_SECRET || '');\nconst httpRequest = (options) => this.helpers.httpRequest(options);\nasync function requestJson(options, label) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const response = await httpRequest({ ...options, json: true, simple: false, resolveWithFullResponse: true, timeout: options.timeout || 120000 });\n      const statusCode = response.statusCode || response.status || 200;\n      const body = response.body ?? response;\n      if (statusCode < 200 || statusCode >= 300) throw new Error(label + ' HTTP ' + statusCode + ': ' + JSON.stringify(body).slice(0, 1000));\n      return body;\n    } catch (error) {\n      lastError = error;\n      const message = String(error?.message || error || '');\n      const responseBody = error?.response?.body || error?.response?.data || {};\n      const responseText = JSON.stringify(responseBody);\n      const transient = responseBody?.code === 1254607\n        || responseText.includes('1254607')\n        || message.includes('1254607')\n        || message.includes('Client network socket disconnected')\n        || message.includes('socket hang up')\n        || message.includes('ECONNRESET')\n        || message.includes('ETIMEDOUT')\n        || message.includes('EAI_AGAIN')\n        || message.includes('HTTP 500')\n        || message.includes('HTTP 502')\n        || message.includes('HTTP 503')\n        || message.includes('HTTP 504');\n      if (!transient || attempt >= 4) throw error;\n      await sleep(2000 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function feishuToken() {\n  const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', headers: { 'Content-Type': 'application/json' }, body: { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET } }, '飞书取 token');\n  return res.tenant_access_token;\n}\nfunction isFeishuNotReady(error) {\n  const message = String(error?.message || error || '');\n  return message.includes('1254607')\n    || message.includes('Client network socket disconnected')\n    || message.includes('socket hang up')\n    || message.includes('ECONNRESET')\n    || message.includes('ETIMEDOUT')\n    || message.includes('EAI_AGAIN');\n}\nasync function withFeishuRetry(operation, label, attempts = 5) {\n  let lastError;\n  for (let attempt = 1; attempt <= attempts; attempt++) {\n    try {\n      return await operation();\n    } catch (error) {\n      lastError = error;\n      if (!isFeishuNotReady(error) || attempt >= attempts) throw error;\n      await sleep(1500 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function getRecord(token, tableId, recordId) {\n  try {\n    return await withFeishuRetry(async () => {\n      const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token } }, '飞书读记录');\n      return res?.data?.record;\n    }, '飞书读记录', 6);\n  } catch (error) {\n    const records = await listRecords(token, tableId, 200);\n    const fallback = records.find((record) => record.record_id === recordId);\n    if (fallback) return fallback;\n    throw error;\n  }\n}\nasync function listRecords(token, tableId, pageSize = 200) {\n  return await withFeishuRetry(async () => {\n    const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize, headers: { Authorization: 'Bearer ' + token } }, '飞书列记录');\n    return res?.data?.items || [];\n  }, '飞书列记录');\n}\nasync function optionalListRecords(token, tableId, pageSize = 200) {\n  try {\n    return await listRecords(token, tableId, pageSize);\n  } catch {\n    return [];\n  }\n}\nasync function updateRecord(token, tableId, recordId, fields) {\n  await withFeishuRetry(async () => {\n    await requestJson({ method: 'PUT', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { fields } }, '飞书更新记录');\n  }, '飞书更新记录');\n}\nasync function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }\nasync function batchCreate(token, tableId, records) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/batch_create', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { records } }, '飞书批量创建');\n      return res?.data?.records || [];\n    } catch (error) {\n      lastError = error;\n      if (!String(error.message || error).includes('1254607') || attempt >= 4) throw error;\n      await sleep(2500 * attempt);\n    }\n  }\n  throw lastError;\n}\nfunction firstSelect(value) { return Array.isArray(value) ? String(value[0]?.text || value[0]?.name || value[0] || '') : String(value || ''); }\nfunction textCell(value) { if (Array.isArray(value)) return value.map((x) => x?.text || x?.name || x).join(''); if (value && typeof value === 'object') return value.text || value.link || ''; return String(value || ''); }\nfunction urlCell(value) { if (Array.isArray(value)) return value[0]?.link || value[0]?.text || ''; if (value && typeof value === 'object') return value.link || value.text || ''; return String(value || ''); }\nfunction linkIds(value) { return Array.isArray(value) ? value.map((x) => x?.record_id || x?.id || x?.record_ids?.[0] || x).filter(Boolean) : []; }\nfunction urlValue(url) { return url ? { text: url, link: url } : null; }\nfunction parseJson(input) {\n  if (input && typeof input === 'object' && !input.text && !input.output) return input;\n  const raw = String(input?.text || input?.output || input?.response || '');\n  const cleaned = raw.replace(/^\\s*\\`\\`\\`(?:json)?/i, '').replace(/\\`\\`\\`\\s*$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch {}\n  const first = cleaned.indexOf('{'); const last = cleaned.lastIndexOf('}');\n  if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));\n  throw new Error('无法解析 JSON: ' + cleaned.slice(0, 500));\n}\nfunction productBriefFromFields(fields) {\n  return {\n    source_url: urlCell(fields['产品链接']), product_name: textCell(fields['产品名称']), brand_name: textCell(fields['品牌名']), category: textCell(fields['品类']), price_info: textCell(fields['价格信息']), product_main_image_url: urlCell(fields['产品主图URL']),\n    core_functions: textCell(fields['核心功能']), materials_ingredients_technology: textCell(fields['材质成分技术']), specs_parameters: textCell(fields['规格参数']), usage_method: textCell(fields['使用方法']), usage_scenarios: textCell(fields['适用场景']),\n    core_selling_points: textCell(fields['核心卖点']), unique_mechanism: textCell(fields['独特机制']), differentiation: textCell(fields['差异化优势']), core_transformation: textCell(fields['核心蜕变']), proof_points: textCell(fields['证据背书']),\n    target_audience: textCell(fields['目标人群']), user_persona: textCell(fields['使用者画像']), buyer_persona: textCell(fields['购买者画像']), visceral_pain_points: textCell(fields['刺骨痛点']), emotional_triggers: textCell(fields['情绪触发器']), buyer_objections: textCell(fields['购买阻力']),\n    visual_hook_elements: textCell(fields['视觉抓手']), offer_promo_guarantee: textCell(fields['优惠促销保障']), recommended_hook_categories: textCell(fields['推荐Hook分类']), risk_constraints: textCell(fields['禁说内容风险点']), manual_notes: textCell(fields['用户手动备注'])\n  };\n}\n\nconst base = $('Load product for Firecrawl').first().json;\nconst token = await feishuToken();\nconst product = await getRecord(token, PRODUCT_TABLE, base.productRecordId);\nif (!product) throw new Error('找不到产品记录');\nconst brief = productBriefFromFields(product.fields);\nconst allHooks = await optionalListRecords(token, HOOK_TABLE, 200);\nconst relatedHooks = allHooks.filter((r) => linkIds(r.fields['关联产品']).includes(base.productRecordId));\nconst existingCategories = [...new Set(relatedHooks.map((r) => firstSelect(r.fields['Hook分类'])).filter(Boolean))];\nconst specifiedCategory = firstSelect(product.fields['指定Hook分类']);\nconst leanBrief = {\n  product_name: brief.product_name,\n  category: brief.category,\n  price_info: brief.price_info,\n  core_selling_points: brief.core_selling_points,\n  target_audience: brief.target_audience,\n  visceral_pain_points: brief.visceral_pain_points,\n  buyer_objections: brief.buyer_objections,\n  emotional_triggers: brief.emotional_triggers,\n  visual_hook_elements: brief.visual_hook_elements,\n  offer_promo_guarantee: brief.offer_promo_guarantee,\n  risk_constraints: brief.risk_constraints,\n  manual_notes: brief.manual_notes\n};\nconst existingConcepts = relatedHooks.map((r) => textCell(r.fields['Hook概念'])).filter(Boolean).slice(-24);\nreturn [{ json: { ...base, brief: leanBrief, briefStr: JSON.stringify({ mode: base.mode, existing_categories: existingCategories, specified_category: specifiedCategory, product_brief: leanBrief, existing_hook_concepts: existingConcepts }, null, 2) } }];\n"
+      },
+      "id": "15a45bd6-29d2-42ec-b360-984d2db583e9"
+    },
+    {
+      "name": "DeepSeek Hooks",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1040,
+        -120
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "=请输出 json。\\n\\n{{ $json.briefStr }}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "你是一位世界级效果广告创意策略师，专精 TikTok、Reels、Shorts 和信息流 UGC 广告。你要基于【产品策略简报】生成高转化 Hook 角度。\n\n## 核心原则\n\n- 产品策略简报只提供产品事实、用户痛点、卖点、阻力和视觉素材。\n- 不要把产品整体锁定为一个认知阶段。\n- 每一条 Hook 都必须单独判断它面向的 `awareness_level`，并写清对应 `emotion_trigger`。\n- 一条 Hook = 分类 + 认知阶段 + 情绪触发 + 视觉开场 + 台词 + 购买阻力反驳。\n\n## Hook 分类\n\n只能使用以下 8 类，不得自创：\n- 对话互动型\n- 视觉冲击型\n- 信任构建型\n- 趋势玩法型\n- 产品展示型\n- 特殊场景型\n- 情感驱动型\n- 促销型\n\n## 认知阶段\n\n每条 Hook 的 `awareness_level` 只能使用：\n- `unaware`：用户还没意识到问题。适合反常识、教育、好奇、生活细节放大。\n- `problem`：用户知道自己有痛点。适合痛点共鸣、冲突、尴尬时刻、情绪放大。\n- `solution`：用户正在找解决方案。适合机制对比、替代方案、为什么这个方法更好。\n- `product`：用户知道这类产品。适合产品优势、信任证据、差异化卖点。\n- `most`：用户接近购买。适合优惠、限时、套装、保障、快速行动理由。\n\n生成时必须覆盖至少 3 个不同的 `awareness_level`。不要让 12 条全部集中在 `most` 或 `product`。\n\n## 情绪触发\n\n每条 Hook 的 `emotion_trigger` 必须具体，不要只写“焦虑”这种泛词。优先从产品简报里的 `emotional_triggers`、`visceral_pain_points`、`buyer_objections` 推导。\n\n可用方向包括但不限于：\n- 安全感\n- 掌控感\n- 害怕踩坑\n- 怕浪费钱\n- 怕显得不专业\n- 省心偷懒\n- 身份认同\n- 被理解感\n- 变美/变好/变轻松的即时期待\n- 限时占便宜\n\n## 生成模式与数量硬规则\n\n你会收到：\n- `product_brief`：产品策略简报\n- `mode`：default / append_same / append_new / specified\n- `existing_categories`：已经生成过的分类\n- `specified_category`：用户指定分类，可为空\n- `existing_hook_concepts`：已经生成过的 Hook 概念\n\n数量必须严格执行：\n- `default`：选择最适合该产品的 4 个分类，每个分类必须生成 3 条，共 12 条。\n- `append_same`：沿用 `existing_categories` 里的 4 个分类，每个分类必须再生成 3 条，共 12 条，不要重复已有角度。\n- `append_new`：尽量选择 `existing_categories` 之外的分类，最多 4 个分类，每个分类必须生成 3 条；如果只剩 2 个新分类，则共 6 条。\n- `specified`：只使用 `specified_category`，必须生成 3 条。\n\n如果 `selected_categories` 有 N 个分类，则 `hooks` 数组长度必须等于 `N * 3`。\n每个分类在 `hooks` 中必须刚好出现 3 次。\n不要因为篇幅、成本或“精选”而减少数量。\n\n## 每类 3 条的差异要求\n\n同一个分类下的 3 条 Hook 必须分别对应不同切入点：\n1. 痛点/冲突切入\n2. 机制/证明切入\n3. 场景/情绪切入\n\n三条不能只是改几个词，必须有不同的第一句话、不同的视觉开场、不同的购买阻力反驳。\n同一分类内 3 条也应尽量覆盖不同 `awareness_level` 或不同 `emotion_trigger`。\n\n## 写作要求\n\n- `hook_concept`：中文 15 字以内，像飞书卡片标题。\n- `hook_script_zh`：中文 40-100 字，只写真人口播/对话台词，不写镜头标注。\n- `hook_script_en`：英文 25-60 词，TikTok native voice，不直译中文。\n- `visual_hook`：0-3 秒镜头脚本，必须包含景别、具体动作、道具、因果动作链。\n- `rehook_zh` / `rehook_en`：反驳购买阻力，必须带具体证据或场景。\n- `benefit_bridge`：机制如何转化为用户可感知收益。\n- `category_rationale`：为什么这个分类适合该产品，引用产品简报字段。\n- `self_score`：1-10 整数。\n- `awareness_level`：只能是 `unaware` / `problem` / `solution` / `product` / `most`。\n- `emotion_trigger`：每条 Hook 的核心情绪触发，必须具体。\n\n## 输出 JSON\n\n严格只返回合法 JSON，不要 Markdown，不要解释，不要代码块：\n\n{\n  \"selected_categories\": [\"分类A\", \"分类B\", \"分类C\", \"分类D\"],\n  \"selection_logic\": \"\",\n  \"hooks\": [\n    {\n      \"hook_category\": \"对话互动型\",\n      \"category_rationale\": \"\",\n      \"hook_concept\": \"\",\n      \"hook_script_zh\": \"\",\n      \"hook_script_en\": \"\",\n      \"awareness_level\": \"problem\",\n      \"emotion_trigger\": \"\",\n      \"visual_hook\": \"\",\n      \"benefit_bridge\": \"\",\n      \"rehook_zh\": \"\",\n      \"rehook_en\": \"\",\n      \"self_score\": 8\n    }\n  ]\n}\n\n## 输出前自检\n\n返回前逐项检查：\n1. `selected_categories` 是否符合 mode？\n2. `hooks.length` 是否等于 `selected_categories.length * 3`？\n3. 每个分类是否刚好 3 条？\n4. 每个分类的 3 条是否分别覆盖痛点/冲突、机制/证明、场景/情绪？\n5. 是否至少覆盖 3 个不同 `awareness_level`？\n6. 每条是否都有具体 `emotion_trigger`？\n7. 是否没有重复 `existing_hook_concepts`？\n"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "4bbd115d-28f0-4f9b-95fd-edcb3426ca36"
+    },
+    {
+      "name": "DeepSeek Hook Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        120
+      ],
+      "parameters": {
+        "model": "deepseek-chat",
+        "options": {
+          "temperature": 0.7,
+          "responseFormat": "json_object",
+          "timeout": 180000,
+          "maxTokens": 8000
+        }
+      },
+      "credentials": {
+        "deepSeekApi": {
+          "id": "hrqsFWPtR87WzqHs",
+          "name": "DeepSeek"
+        }
+      },
+      "id": "1f2215b9-835a-43af-a052-6708cc5dffcf"
+    },
+    {
+      "name": "Write hooks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        -120
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "\n\nconst APP_TOKEN = \"YOUR_FEISHU_BASE_TOKEN\";\nconst PRODUCT_TABLE = \"YOUR_PRODUCT_TABLE_ID\";\nconst HOOK_TABLE = \"YOUR_HOOK_TABLE_ID\";\nconst FEISHU_APP_ID = 'YOUR_FEISHU_APP_ID';\nconst FEISHU_APP_SECRET = String($env.FEISHU_APP_SECRET || '');\nconst httpRequest = (options) => this.helpers.httpRequest(options);\nasync function requestJson(options, label) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const response = await httpRequest({ ...options, json: true, simple: false, resolveWithFullResponse: true, timeout: options.timeout || 120000 });\n      const statusCode = response.statusCode || response.status || 200;\n      const body = response.body ?? response;\n      if (statusCode < 200 || statusCode >= 300) throw new Error(label + ' HTTP ' + statusCode + ': ' + JSON.stringify(body).slice(0, 1000));\n      return body;\n    } catch (error) {\n      lastError = error;\n      const message = String(error?.message || error || '');\n      const responseBody = error?.response?.body || error?.response?.data || {};\n      const responseText = JSON.stringify(responseBody);\n      const transient = responseBody?.code === 1254607\n        || responseText.includes('1254607')\n        || message.includes('1254607')\n        || message.includes('Client network socket disconnected')\n        || message.includes('socket hang up')\n        || message.includes('ECONNRESET')\n        || message.includes('ETIMEDOUT')\n        || message.includes('EAI_AGAIN')\n        || message.includes('HTTP 500')\n        || message.includes('HTTP 502')\n        || message.includes('HTTP 503')\n        || message.includes('HTTP 504');\n      if (!transient || attempt >= 4) throw error;\n      await sleep(2000 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function feishuToken() {\n  const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', headers: { 'Content-Type': 'application/json' }, body: { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET } }, '飞书取 token');\n  return res.tenant_access_token;\n}\nfunction isFeishuNotReady(error) {\n  const message = String(error?.message || error || '');\n  return message.includes('1254607')\n    || message.includes('Client network socket disconnected')\n    || message.includes('socket hang up')\n    || message.includes('ECONNRESET')\n    || message.includes('ETIMEDOUT')\n    || message.includes('EAI_AGAIN');\n}\nasync function withFeishuRetry(operation, label, attempts = 5) {\n  let lastError;\n  for (let attempt = 1; attempt <= attempts; attempt++) {\n    try {\n      return await operation();\n    } catch (error) {\n      lastError = error;\n      if (!isFeishuNotReady(error) || attempt >= attempts) throw error;\n      await sleep(1500 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function getRecord(token, tableId, recordId) {\n  try {\n    return await withFeishuRetry(async () => {\n      const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token } }, '飞书读记录');\n      return res?.data?.record;\n    }, '飞书读记录', 6);\n  } catch (error) {\n    const records = await listRecords(token, tableId, 200);\n    const fallback = records.find((record) => record.record_id === recordId);\n    if (fallback) return fallback;\n    throw error;\n  }\n}\nasync function listRecords(token, tableId, pageSize = 200) {\n  return await withFeishuRetry(async () => {\n    const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize, headers: { Authorization: 'Bearer ' + token } }, '飞书列记录');\n    return res?.data?.items || [];\n  }, '飞书列记录');\n}\nasync function optionalListRecords(token, tableId, pageSize = 200) {\n  try {\n    return await listRecords(token, tableId, pageSize);\n  } catch {\n    return [];\n  }\n}\nasync function updateRecord(token, tableId, recordId, fields) {\n  await withFeishuRetry(async () => {\n    await requestJson({ method: 'PUT', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { fields } }, '飞书更新记录');\n  }, '飞书更新记录');\n}\nasync function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }\nasync function batchCreate(token, tableId, records) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/batch_create', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { records } }, '飞书批量创建');\n      return res?.data?.records || [];\n    } catch (error) {\n      lastError = error;\n      if (!String(error.message || error).includes('1254607') || attempt >= 4) throw error;\n      await sleep(2500 * attempt);\n    }\n  }\n  throw lastError;\n}\nfunction firstSelect(value) { return Array.isArray(value) ? String(value[0]?.text || value[0]?.name || value[0] || '') : String(value || ''); }\nfunction textCell(value) { if (Array.isArray(value)) return value.map((x) => x?.text || x?.name || x).join(''); if (value && typeof value === 'object') return value.text || value.link || ''; return String(value || ''); }\nfunction urlCell(value) { if (Array.isArray(value)) return value[0]?.link || value[0]?.text || ''; if (value && typeof value === 'object') return value.link || value.text || ''; return String(value || ''); }\nfunction linkIds(value) { return Array.isArray(value) ? value.map((x) => x?.record_id || x?.id || x?.record_ids?.[0] || x).filter(Boolean) : []; }\nfunction urlValue(url) { return url ? { text: url, link: url } : null; }\nfunction parseJson(input) {\n  if (input && typeof input === 'object' && !input.text && !input.output) return input;\n  const raw = String(input?.text || input?.output || input?.response || '');\n  const cleaned = raw.replace(/^\\s*\\`\\`\\`(?:json)?/i, '').replace(/\\`\\`\\`\\s*$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch {}\n  const first = cleaned.indexOf('{'); const last = cleaned.lastIndexOf('}');\n  if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));\n  throw new Error('无法解析 JSON: ' + cleaned.slice(0, 500));\n}\nfunction productBriefFromFields(fields) {\n  return {\n    source_url: urlCell(fields['产品链接']), product_name: textCell(fields['产品名称']), brand_name: textCell(fields['品牌名']), category: textCell(fields['品类']), price_info: textCell(fields['价格信息']), product_main_image_url: urlCell(fields['产品主图URL']),\n    core_functions: textCell(fields['核心功能']), materials_ingredients_technology: textCell(fields['材质成分技术']), specs_parameters: textCell(fields['规格参数']), usage_method: textCell(fields['使用方法']), usage_scenarios: textCell(fields['适用场景']),\n    core_selling_points: textCell(fields['核心卖点']), unique_mechanism: textCell(fields['独特机制']), differentiation: textCell(fields['差异化优势']), core_transformation: textCell(fields['核心蜕变']), proof_points: textCell(fields['证据背书']),\n    target_audience: textCell(fields['目标人群']), user_persona: textCell(fields['使用者画像']), buyer_persona: textCell(fields['购买者画像']), visceral_pain_points: textCell(fields['刺骨痛点']), emotional_triggers: textCell(fields['情绪触发器']), buyer_objections: textCell(fields['购买阻力']),\n    visual_hook_elements: textCell(fields['视觉抓手']), offer_promo_guarantee: textCell(fields['优惠促销保障']), recommended_hook_categories: textCell(fields['推荐Hook分类']), risk_constraints: textCell(fields['禁说内容风险点']), manual_notes: textCell(fields['用户手动备注'])\n  };\n}\n\nconst base = $('Prepare hooks from product').first().json;\nconst token = await feishuToken();\nconst product = await getRecord(token, PRODUCT_TABLE, base.productRecordId);\nconst productUrl = urlCell(product.fields['产品链接']);\ntry {\n  const parsed = parseJson($input.first().json);\n  const hooks = Array.isArray(parsed.hooks) ? parsed.hooks : [];\n  if (!hooks.length) throw new Error('Hook 生成结果为空。');\n  const batch = base.mode + '-' + Date.now();\n  const strategyMap = { default: '默认精选', append_same: '同类追加', append_new: '换分类', specified: '指定分类' };\n  const productName = brief.product_name || textCell(product.fields['产品名称']) || '';\n  const records = hooks.map((h) => ({ fields: {\n    '产品链接': urlValue(productUrl), '产品名称': productName, 'Hook分类': h.hook_category || '', 'Hook概念': h.hook_concept || '', '开头脚本_zh': h.hook_script_zh || '', '开头脚本_en': h.hook_script_en || '',\n    'Rehook_zh': h.rehook_zh || '', 'Rehook_en': h.rehook_en || '', '认知阶段': h.awareness_level || 'problem', '情绪触发': h.emotion_trigger || '', '视觉开场': h.visual_hook || '', '收益桥接': h.benefit_bridge || '', '分类理由': h.category_rationale || '',\n    '自评分': Number(h.self_score) || 0, '生成批次': batch, '分类策略': strategyMap[base.mode] || '默认精选', '脚本状态': '未生成', '关联产品': [base.productRecordId]\n  }}));\n  await batchCreate(token, HOOK_TABLE, records);\n  await updateRecord(token, PRODUCT_TABLE, base.productRecordId, { '状态': '已生成', '已生成分类记录': (parsed.selected_categories || []).join(' / '), '错误信息': '' });\n  return [{ json: { message: 'Hook generated', created: records.length, categories: parsed.selected_categories || [] } }];\n} catch (error) {\n  await updateRecord(token, PRODUCT_TABLE, base.productRecordId, { '状态': '失败', '错误信息': (error.message || String(error)).slice(0, 4000) });\n  throw error;\n}\n"
+      },
+      "id": "a1b77bf3-39be-49a9-a0f9-5856262439fb"
+    }
+  ],
+  "connections": {
+    "Webhook: Generate Hooks": {
+      "main": [
+        [
+          {
+            "node": "Load product for Firecrawl",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load product for Firecrawl": {
+      "main": [
+        [
+          {
+            "node": "Mode is hooks only?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mode is hooks only?": {
+      "main": [
+        [
+          {
+            "node": "Prepare hooks from product",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Firecrawl scrape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Firecrawl scrape": {
+      "main": [
+        [
+          {
+            "node": "Prepare product brief input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare product brief input": {
+      "main": [
+        [
+          {
+            "node": "DeepSeek Product Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Product Brief": {
+      "main": [
+        [
+          {
+            "node": "Write product brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Product Brief Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "DeepSeek Product Brief",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare hooks from product": {
+      "main": [
+        [
+          {
+            "node": "DeepSeek Hooks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Hooks": {
+      "main": [
+        [
+          {
+            "node": "Write hooks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Hook Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "DeepSeek Hooks",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": null,
+  "activeVersionId": "059df0f9-56d9-45ed-951c-ac4711eec87d",
+  "versionCounter": 87,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-05-20T04:02:15.234Z",
+      "createdAt": "2026-05-20T04:02:15.234Z",
+      "role": "workflow:owner",
+      "workflowId": "5mGoEA5kHAfeftvF",
+      "projectId": "jHhLQ3oygEhG0Lcr",
+      "project": {
+        "updatedAt": "2026-05-12T15:46:04.393Z",
+        "createdAt": "2026-05-12T11:35:09.539Z",
+        "id": "jHhLQ3oygEhG0Lcr",
+        "name": "Yueying Wu <shellyying950526@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "5aa488b4-77bf-43f0-82bd-3daccdaa2b29"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-05-22T09:54:23.460Z",
+    "createdAt": "2026-05-22T09:54:23.460Z",
+    "versionId": "059df0f9-56d9-45ed-951c-ac4711eec87d",
+    "workflowId": "5mGoEA5kHAfeftvF",
+    "nodes": [
+      {
+        "name": "Webhook: Generate Hooks",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "path": "final-generate-hooks",
+          "httpMethod": "GET",
+          "responseMode": "onReceived",
+          "responseData": "firstEntryJson",
+          "options": {
+            "responseCode": 200,
+            "responseData": "任务已开始，请回到前端等待自动刷新。"
+          }
+        },
+        "id": "dd811600-da55-4ef1-8c3e-9783dfe5c28d",
+        "webhookId": "04d2dc55-48f5-4fce-be2f-ac5dfd98048c"
+      },
+      {
+        "name": "Load product for Firecrawl",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          0
+        ],
+        "parameters": {
+          "language": "javaScript",
+          "jsCode": "\n\nconst APP_TOKEN = \"YOUR_FEISHU_BASE_TOKEN\";\nconst PRODUCT_TABLE = \"YOUR_PRODUCT_TABLE_ID\";\nconst HOOK_TABLE = \"YOUR_HOOK_TABLE_ID\";\nconst FEISHU_APP_ID = 'YOUR_FEISHU_APP_ID';\nconst FEISHU_APP_SECRET = String($env.FEISHU_APP_SECRET || '');\nconst httpRequest = (options) => this.helpers.httpRequest(options);\nasync function requestJson(options, label) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const response = await httpRequest({ ...options, json: true, simple: false, resolveWithFullResponse: true, timeout: options.timeout || 120000 });\n      const statusCode = response.statusCode || response.status || 200;\n      const body = response.body ?? response;\n      if (statusCode < 200 || statusCode >= 300) throw new Error(label + ' HTTP ' + statusCode + ': ' + JSON.stringify(body).slice(0, 1000));\n      return body;\n    } catch (error) {\n      lastError = error;\n      const message = String(error?.message || error || '');\n      const responseBody = error?.response?.body || error?.response?.data || {};\n      const responseText = JSON.stringify(responseBody);\n      const transient = responseBody?.code === 1254607\n        || responseText.includes('1254607')\n        || message.includes('1254607')\n        || message.includes('Client network socket disconnected')\n        || message.includes('socket hang up')\n        || message.includes('ECONNRESET')\n        || message.includes('ETIMEDOUT')\n        || message.includes('EAI_AGAIN')\n        || message.includes('HTTP 500')\n        || message.includes('HTTP 502')\n        || message.includes('HTTP 503')\n        || message.includes('HTTP 504');\n      if (!transient || attempt >= 4) throw error;\n      await sleep(2000 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function feishuToken() {\n  const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', headers: { 'Content-Type': 'application/json' }, body: { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET } }, '飞书取 token');\n  return res.tenant_access_token;\n}\nfunction isFeishuNotReady(error) {\n  const message = String(error?.message || error || '');\n  return message.includes('1254607')\n    || message.includes('Client network socket disconnected')\n    || message.includes('socket hang up')\n    || message.includes('ECONNRESET')\n    || message.includes('ETIMEDOUT')\n    || message.includes('EAI_AGAIN');\n}\nasync function withFeishuRetry(operation, label, attempts = 5) {\n  let lastError;\n  for (let attempt = 1; attempt <= attempts; attempt++) {\n    try {\n      return await operation();\n    } catch (error) {\n      lastError = error;\n      if (!isFeishuNotReady(error) || attempt >= attempts) throw error;\n      await sleep(1500 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function getRecord(token, tableId, recordId) {\n  try {\n    return await withFeishuRetry(async () => {\n      const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token } }, '飞书读记录');\n      return res?.data?.record;\n    }, '飞书读记录', 6);\n  } catch (error) {\n    const records = await listRecords(token, tableId, 200);\n    const fallback = records.find((record) => record.record_id === recordId);\n    if (fallback) return fallback;\n    throw error;\n  }\n}\nasync function listRecords(token, tableId, pageSize = 200) {\n  return await withFeishuRetry(async () => {\n    const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize, headers: { Authorization: 'Bearer ' + token } }, '飞书列记录');\n    return res?.data?.items || [];\n  }, '飞书列记录');\n}\nasync function optionalListRecords(token, tableId, pageSize = 200) {\n  try {\n    return await listRecords(token, tableId, pageSize);\n  } catch {\n    return [];\n  }\n}\nasync function updateRecord(token, tableId, recordId, fields) {\n  await withFeishuRetry(async () => {\n    await requestJson({ method: 'PUT', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { fields } }, '飞书更新记录');\n  }, '飞书更新记录');\n}\nasync function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }\nasync function batchCreate(token, tableId, records) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/batch_create', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { records } }, '飞书批量创建');\n      return res?.data?.records || [];\n    } catch (error) {\n      lastError = error;\n      if (!String(error.message || error).includes('1254607') || attempt >= 4) throw error;\n      await sleep(2500 * attempt);\n    }\n  }\n  throw lastError;\n}\nfunction firstSelect(value) { return Array.isArray(value) ? String(value[0]?.text || value[0]?.name || value[0] || '') : String(value || ''); }\nfunction textCell(value) { if (Array.isArray(value)) return value.map((x) => x?.text || x?.name || x).join(''); if (value && typeof value === 'object') return value.text || value.link || ''; return String(value || ''); }\nfunction urlCell(value) { if (Array.isArray(value)) return value[0]?.link || value[0]?.text || ''; if (value && typeof value === 'object') return value.link || value.text || ''; return String(value || ''); }\nfunction linkIds(value) { return Array.isArray(value) ? value.map((x) => x?.record_id || x?.id || x?.record_ids?.[0] || x).filter(Boolean) : []; }\nfunction urlValue(url) { return url ? { text: url, link: url } : null; }\nfunction parseJson(input) {\n  if (input && typeof input === 'object' && !input.text && !input.output) return input;\n  const raw = String(input?.text || input?.output || input?.response || '');\n  const cleaned = raw.replace(/^\\s*\\`\\`\\`(?:json)?/i, '').replace(/\\`\\`\\`\\s*$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch {}\n  const first = cleaned.indexOf('{'); const last = cleaned.lastIndexOf('}');\n  if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));\n  throw new Error('无法解析 JSON: ' + cleaned.slice(0, 500));\n}\nfunction productBriefFromFields(fields) {\n  return {\n    source_url: urlCell(fields['产品链接']), product_name: textCell(fields['产品名称']), brand_name: textCell(fields['品牌名']), category: textCell(fields['品类']), price_info: textCell(fields['价格信息']), product_main_image_url: urlCell(fields['产品主图URL']),\n    core_functions: textCell(fields['核心功能']), materials_ingredients_technology: textCell(fields['材质成分技术']), specs_parameters: textCell(fields['规格参数']), usage_method: textCell(fields['使用方法']), usage_scenarios: textCell(fields['适用场景']),\n    core_selling_points: textCell(fields['核心卖点']), unique_mechanism: textCell(fields['独特机制']), differentiation: textCell(fields['差异化优势']), core_transformation: textCell(fields['核心蜕变']), proof_points: textCell(fields['证据背书']),\n    target_audience: textCell(fields['目标人群']), user_persona: textCell(fields['使用者画像']), buyer_persona: textCell(fields['购买者画像']), visceral_pain_points: textCell(fields['刺骨痛点']), emotional_triggers: textCell(fields['情绪触发器']), buyer_objections: textCell(fields['购买阻力']),\n    visual_hook_elements: textCell(fields['视觉抓手']), offer_promo_guarantee: textCell(fields['优惠促销保障']), recommended_hook_categories: textCell(fields['推荐Hook分类']), risk_constraints: textCell(fields['禁说内容风险点']), manual_notes: textCell(fields['用户手动备注'])\n  };\n}\n\nconst query = $input.first().json.query || {};\nconst productRecordId = String(query.product_record_id || '').trim();\nconst mode = String(query.mode || 'brief_only').trim();\nif (!productRecordId) throw new Error('缺少 product_record_id');\nconst token = await feishuToken();\nconst product = await getRecord(token, PRODUCT_TABLE, productRecordId);\nif (!product) throw new Error('找不到产品记录');\nconst productUrl = urlCell(product.fields['产品链接']);\nif (!productUrl) throw new Error('产品链接为空');\nawait updateRecord(token, PRODUCT_TABLE, productRecordId, { '状态': mode === 'hooks_only' ? '生成中' : '生成中', '错误信息': '' });\nreturn [{ json: { productRecordId, mode, productUrl } }];\n"
+        },
+        "id": "3f729940-73c2-41a2-a1c2-5bc6e27019bc"
+      },
+      {
+        "name": "Mode is hooks only?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          520,
+          0
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "id": "mode-hooks-only",
+                "leftValue": "={{ $json.mode }}",
+                "rightValue": "hooks_only",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "71b15522-a00a-45c2-aa67-7d237720de9e"
+      },
+      {
+        "name": "Firecrawl scrape",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          780,
+          140
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "q0u26QvlaaLRDpC7",
+            "name": "Firecrawl"
+          }
+        },
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.firecrawl.dev/v1/scrape",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"url\": \"{{ $json.productUrl }}\",\n  \"formats\": [\"markdown\"],\n  \"onlyMainContent\": true,\n  \"waitFor\": 2000\n}",
+          "options": {
+            "response": {
+              "neverError": true
+            },
+            "timeout": 60000
+          }
+        },
+        "id": "3977ec8b-e74f-4a2b-9836-533b4c5a1641"
+      },
+      {
+        "name": "Prepare product brief input",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1040,
+          140
+        ],
+        "parameters": {
+          "language": "javaScript",
+          "jsCode": "\nconst previous = $('Load product for Firecrawl').first().json;\nconst firecrawl = $input.first().json || {};\nconst pageContent = String(firecrawl?.data?.markdown || firecrawl?.data?.content || firecrawl?.markdown || firecrawl?.content || '').slice(0, 12000);\nconst meta = firecrawl?.data?.metadata || firecrawl?.metadata || {};\nconst image = meta.ogImage || meta.image || '';\nif (!pageContent) throw new Error('抓取结果没有正文。');\nreturn [{ json: { ...previous, pageContent, scrapedImage: image } }];\n"
+        },
+        "id": "e4c9ad40-58f9-464d-8967-58fc2a9c0f1d"
+      },
+      {
+        "name": "DeepSeek Product Brief",
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.9,
+        "position": [
+          1300,
+          140
+        ],
+        "parameters": {
+          "promptType": "define",
+          "text": "=请输出 json。\\nsource_url: {{ $json.productUrl }}\\n\\npage_content:\\n{{ $json.pageContent }}",
+          "messages": {
+            "messageValues": [
+              {
+                "type": "SystemMessagePromptTemplate",
+                "message": "你是一位资深电商广告策略师、消费者研究员和短视频创意总监。你的任务是从产品页面抓取文本中，生成一份可被人工修改、并能驱动 Hook、脚本和 UGC 视频生成的【产品策略简报】。\n\n## 输入\n你会收到：\n- source_url：产品链接\n- page_content：抓取到的产品页面文本\n\n## 输出规则\n- 严格只返回合法 JSON，不要 Markdown，不要解释。\n- 所有字段都要尽量具体，能直接指导短视频创意。\n- 如果页面没写清楚，可以基于品类常识推断，但需要在 `manual_notes` 或相关字段里标注“推断”。\n- 不要夸大医疗、功效、收益承诺；只使用页面事实和合理营销表达。\n- 不要输出产品级 `awareness_stage`。认知阶段应在 Hook 生成时按每条 Hook 的角度单独判断。\n\n## 输出 JSON 字段\n{\n  \"source_url\": \"\",\n  \"product_name\": \"\",\n  \"brand_name\": \"\",\n  \"category\": \"\",\n  \"price_info\": \"\",\n  \"product_main_image_url\": \"\",\n  \"core_functions\": \"\",\n  \"materials_ingredients_technology\": \"\",\n  \"specs_parameters\": \"\",\n  \"usage_method\": \"\",\n  \"usage_scenarios\": \"\",\n  \"core_selling_points\": \"\",\n  \"unique_mechanism\": \"\",\n  \"differentiation\": \"\",\n  \"core_transformation\": \"\",\n  \"proof_points\": \"\",\n  \"target_audience\": \"\",\n  \"user_persona\": \"\",\n  \"buyer_persona\": \"\",\n  \"visceral_pain_points\": \"\",\n  \"emotional_triggers\": \"\",\n  \"buyer_objections\": \"\",\n  \"visual_hook_elements\": \"\",\n  \"offer_promo_guarantee\": \"\",\n  \"recommended_hook_categories\": \"\",\n  \"risk_constraints\": \"\",\n  \"manual_notes\": \"\"\n}\n"
+              }
+            ]
+          },
+          "batching": {}
+        },
+        "id": "51742b30-f0dc-4f24-8718-229d64f5bd68"
+      },
+      {
+        "name": "DeepSeek Product Brief Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+        "typeVersion": 1,
+        "position": [
+          1300,
+          360
+        ],
+        "parameters": {
+          "model": "deepseek-chat",
+          "options": {
+            "temperature": 0.2,
+            "responseFormat": "json_object",
+            "timeout": 180000,
+            "maxTokens": 6000
+          }
+        },
+        "credentials": {
+          "deepSeekApi": {
+            "id": "hrqsFWPtR87WzqHs",
+            "name": "DeepSeek"
+          }
+        },
+        "id": "73b0b626-2367-4aaa-a91f-9a7114a1da13"
+      },
+      {
+        "name": "Write product brief",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1560,
+          140
+        ],
+        "parameters": {
+          "language": "javaScript",
+          "jsCode": "\n\nconst APP_TOKEN = \"YOUR_FEISHU_BASE_TOKEN\";\nconst PRODUCT_TABLE = \"YOUR_PRODUCT_TABLE_ID\";\nconst HOOK_TABLE = \"YOUR_HOOK_TABLE_ID\";\nconst FEISHU_APP_ID = 'YOUR_FEISHU_APP_ID';\nconst FEISHU_APP_SECRET = String($env.FEISHU_APP_SECRET || '');\nconst httpRequest = (options) => this.helpers.httpRequest(options);\nasync function requestJson(options, label) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const response = await httpRequest({ ...options, json: true, simple: false, resolveWithFullResponse: true, timeout: options.timeout || 120000 });\n      const statusCode = response.statusCode || response.status || 200;\n      const body = response.body ?? response;\n      if (statusCode < 200 || statusCode >= 300) throw new Error(label + ' HTTP ' + statusCode + ': ' + JSON.stringify(body).slice(0, 1000));\n      return body;\n    } catch (error) {\n      lastError = error;\n      const message = String(error?.message || error || '');\n      const responseBody = error?.response?.body || error?.response?.data || {};\n      const responseText = JSON.stringify(responseBody);\n      const transient = responseBody?.code === 1254607\n        || responseText.includes('1254607')\n        || message.includes('1254607')\n        || message.includes('Client network socket disconnected')\n        || message.includes('socket hang up')\n        || message.includes('ECONNRESET')\n        || message.includes('ETIMEDOUT')\n        || message.includes('EAI_AGAIN')\n        || message.includes('HTTP 500')\n        || message.includes('HTTP 502')\n        || message.includes('HTTP 503')\n        || message.includes('HTTP 504');\n      if (!transient || attempt >= 4) throw error;\n      await sleep(2000 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function feishuToken() {\n  const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', headers: { 'Content-Type': 'application/json' }, body: { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET } }, '飞书取 token');\n  return res.tenant_access_token;\n}\nfunction isFeishuNotReady(error) {\n  const message = String(error?.message || error || '');\n  return message.includes('1254607')\n    || message.includes('Client network socket disconnected')\n    || message.includes('socket hang up')\n    || message.includes('ECONNRESET')\n    || message.includes('ETIMEDOUT')\n    || message.includes('EAI_AGAIN');\n}\nasync function withFeishuRetry(operation, label, attempts = 5) {\n  let lastError;\n  for (let attempt = 1; attempt <= attempts; attempt++) {\n    try {\n      return await operation();\n    } catch (error) {\n      lastError = error;\n      if (!isFeishuNotReady(error) || attempt >= attempts) throw error;\n      await sleep(1500 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function getRecord(token, tableId, recordId) {\n  try {\n    return await withFeishuRetry(async () => {\n      const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token } }, '飞书读记录');\n      return res?.data?.record;\n    }, '飞书读记录', 6);\n  } catch (error) {\n    const records = await listRecords(token, tableId, 200);\n    const fallback = records.find((record) => record.record_id === recordId);\n    if (fallback) return fallback;\n    throw error;\n  }\n}\nasync function listRecords(token, tableId, pageSize = 200) {\n  return await withFeishuRetry(async () => {\n    const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize, headers: { Authorization: 'Bearer ' + token } }, '飞书列记录');\n    return res?.data?.items || [];\n  }, '飞书列记录');\n}\nasync function optionalListRecords(token, tableId, pageSize = 200) {\n  try {\n    return await listRecords(token, tableId, pageSize);\n  } catch {\n    return [];\n  }\n}\nasync function updateRecord(token, tableId, recordId, fields) {\n  await withFeishuRetry(async () => {\n    await requestJson({ method: 'PUT', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { fields } }, '飞书更新记录');\n  }, '飞书更新记录');\n}\nasync function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }\nasync function batchCreate(token, tableId, records) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/batch_create', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { records } }, '飞书批量创建');\n      return res?.data?.records || [];\n    } catch (error) {\n      lastError = error;\n      if (!String(error.message || error).includes('1254607') || attempt >= 4) throw error;\n      await sleep(2500 * attempt);\n    }\n  }\n  throw lastError;\n}\nfunction firstSelect(value) { return Array.isArray(value) ? String(value[0]?.text || value[0]?.name || value[0] || '') : String(value || ''); }\nfunction textCell(value) { if (Array.isArray(value)) return value.map((x) => x?.text || x?.name || x).join(''); if (value && typeof value === 'object') return value.text || value.link || ''; return String(value || ''); }\nfunction urlCell(value) { if (Array.isArray(value)) return value[0]?.link || value[0]?.text || ''; if (value && typeof value === 'object') return value.link || value.text || ''; return String(value || ''); }\nfunction linkIds(value) { return Array.isArray(value) ? value.map((x) => x?.record_id || x?.id || x?.record_ids?.[0] || x).filter(Boolean) : []; }\nfunction urlValue(url) { return url ? { text: url, link: url } : null; }\nfunction parseJson(input) {\n  if (input && typeof input === 'object' && !input.text && !input.output) return input;\n  const raw = String(input?.text || input?.output || input?.response || '');\n  const cleaned = raw.replace(/^\\s*\\`\\`\\`(?:json)?/i, '').replace(/\\`\\`\\`\\s*$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch {}\n  const first = cleaned.indexOf('{'); const last = cleaned.lastIndexOf('}');\n  if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));\n  throw new Error('无法解析 JSON: ' + cleaned.slice(0, 500));\n}\nfunction productBriefFromFields(fields) {\n  return {\n    source_url: urlCell(fields['产品链接']), product_name: textCell(fields['产品名称']), brand_name: textCell(fields['品牌名']), category: textCell(fields['品类']), price_info: textCell(fields['价格信息']), product_main_image_url: urlCell(fields['产品主图URL']),\n    core_functions: textCell(fields['核心功能']), materials_ingredients_technology: textCell(fields['材质成分技术']), specs_parameters: textCell(fields['规格参数']), usage_method: textCell(fields['使用方法']), usage_scenarios: textCell(fields['适用场景']),\n    core_selling_points: textCell(fields['核心卖点']), unique_mechanism: textCell(fields['独特机制']), differentiation: textCell(fields['差异化优势']), core_transformation: textCell(fields['核心蜕变']), proof_points: textCell(fields['证据背书']),\n    target_audience: textCell(fields['目标人群']), user_persona: textCell(fields['使用者画像']), buyer_persona: textCell(fields['购买者画像']), visceral_pain_points: textCell(fields['刺骨痛点']), emotional_triggers: textCell(fields['情绪触发器']), buyer_objections: textCell(fields['购买阻力']),\n    visual_hook_elements: textCell(fields['视觉抓手']), offer_promo_guarantee: textCell(fields['优惠促销保障']), recommended_hook_categories: textCell(fields['推荐Hook分类']), risk_constraints: textCell(fields['禁说内容风险点']), manual_notes: textCell(fields['用户手动备注'])\n  };\n}\n\nconst base = $('Prepare product brief input').first().json;\nconst token = await feishuToken();\nconst product = await getRecord(token, PRODUCT_TABLE, base.productRecordId);\nlet brief = { ...productBriefFromFields(product.fields), ...parseJson($input.first().json) };\nif (!brief.product_main_image_url) brief.product_main_image_url = base.scrapedImage || '';\nawait updateRecord(token, PRODUCT_TABLE, base.productRecordId, {\n  '产品名称': brief.product_name || '', '品牌名': brief.brand_name || '', '品类': brief.category || '', '价格信息': brief.price_info || '',\n  '产品主图URL': urlValue(brief.product_main_image_url), '核心功能': brief.core_functions || '', '材质成分技术': brief.materials_ingredients_technology || '', '规格参数': brief.specs_parameters || '',\n  '使用方法': brief.usage_method || '', '适用场景': brief.usage_scenarios || '', '核心卖点': brief.core_selling_points || '', '独特机制': brief.unique_mechanism || '',\n  '差异化优势': brief.differentiation || '', '核心蜕变': brief.core_transformation || '', '证据背书': brief.proof_points || '', '目标人群': brief.target_audience || '',\n  '使用者画像': brief.user_persona || '', '购买者画像': brief.buyer_persona || '', '刺骨痛点': brief.visceral_pain_points || '', '情绪触发器': brief.emotional_triggers || '',\n  '购买阻力': brief.buyer_objections || '', '视觉抓手': brief.visual_hook_elements || '', '优惠促销保障': brief.offer_promo_guarantee || '',\n  '推荐Hook分类': brief.recommended_hook_categories || '', '禁说内容风险点': brief.risk_constraints || '', '用户手动备注': brief.manual_notes || '', '原始抓取内容': base.pageContent.slice(0, 3000)\n});\nawait updateRecord(token, PRODUCT_TABLE, base.productRecordId, { '状态': '已生成', '错误信息': '' });\nreturn [{ json: { message: 'Product brief generated', productRecordId: base.productRecordId } }];\n"
+        },
+        "id": "70a2dd46-33b3-4556-8aa1-10216de377b4"
+      },
+      {
+        "name": "Prepare hooks from product",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          780,
+          -120
+        ],
+        "parameters": {
+          "language": "javaScript",
+          "jsCode": "\n\nconst APP_TOKEN = \"YOUR_FEISHU_BASE_TOKEN\";\nconst PRODUCT_TABLE = \"YOUR_PRODUCT_TABLE_ID\";\nconst HOOK_TABLE = \"YOUR_HOOK_TABLE_ID\";\nconst FEISHU_APP_ID = 'YOUR_FEISHU_APP_ID';\nconst FEISHU_APP_SECRET = String($env.FEISHU_APP_SECRET || '');\nconst httpRequest = (options) => this.helpers.httpRequest(options);\nasync function requestJson(options, label) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const response = await httpRequest({ ...options, json: true, simple: false, resolveWithFullResponse: true, timeout: options.timeout || 120000 });\n      const statusCode = response.statusCode || response.status || 200;\n      const body = response.body ?? response;\n      if (statusCode < 200 || statusCode >= 300) throw new Error(label + ' HTTP ' + statusCode + ': ' + JSON.stringify(body).slice(0, 1000));\n      return body;\n    } catch (error) {\n      lastError = error;\n      const message = String(error?.message || error || '');\n      const responseBody = error?.response?.body || error?.response?.data || {};\n      const responseText = JSON.stringify(responseBody);\n      const transient = responseBody?.code === 1254607\n        || responseText.includes('1254607')\n        || message.includes('1254607')\n        || message.includes('Client network socket disconnected')\n        || message.includes('socket hang up')\n        || message.includes('ECONNRESET')\n        || message.includes('ETIMEDOUT')\n        || message.includes('EAI_AGAIN')\n        || message.includes('HTTP 500')\n        || message.includes('HTTP 502')\n        || message.includes('HTTP 503')\n        || message.includes('HTTP 504');\n      if (!transient || attempt >= 4) throw error;\n      await sleep(2000 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function feishuToken() {\n  const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', headers: { 'Content-Type': 'application/json' }, body: { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET } }, '飞书取 token');\n  return res.tenant_access_token;\n}\nfunction isFeishuNotReady(error) {\n  const message = String(error?.message || error || '');\n  return message.includes('1254607')\n    || message.includes('Client network socket disconnected')\n    || message.includes('socket hang up')\n    || message.includes('ECONNRESET')\n    || message.includes('ETIMEDOUT')\n    || message.includes('EAI_AGAIN');\n}\nasync function withFeishuRetry(operation, label, attempts = 5) {\n  let lastError;\n  for (let attempt = 1; attempt <= attempts; attempt++) {\n    try {\n      return await operation();\n    } catch (error) {\n      lastError = error;\n      if (!isFeishuNotReady(error) || attempt >= attempts) throw error;\n      await sleep(1500 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function getRecord(token, tableId, recordId) {\n  try {\n    return await withFeishuRetry(async () => {\n      const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token } }, '飞书读记录');\n      return res?.data?.record;\n    }, '飞书读记录', 6);\n  } catch (error) {\n    const records = await listRecords(token, tableId, 200);\n    const fallback = records.find((record) => record.record_id === recordId);\n    if (fallback) return fallback;\n    throw error;\n  }\n}\nasync function listRecords(token, tableId, pageSize = 200) {\n  return await withFeishuRetry(async () => {\n    const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize, headers: { Authorization: 'Bearer ' + token } }, '飞书列记录');\n    return res?.data?.items || [];\n  }, '飞书列记录');\n}\nasync function optionalListRecords(token, tableId, pageSize = 200) {\n  try {\n    return await listRecords(token, tableId, pageSize);\n  } catch {\n    return [];\n  }\n}\nasync function updateRecord(token, tableId, recordId, fields) {\n  await withFeishuRetry(async () => {\n    await requestJson({ method: 'PUT', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { fields } }, '飞书更新记录');\n  }, '飞书更新记录');\n}\nasync function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }\nasync function batchCreate(token, tableId, records) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/batch_create', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { records } }, '飞书批量创建');\n      return res?.data?.records || [];\n    } catch (error) {\n      lastError = error;\n      if (!String(error.message || error).includes('1254607') || attempt >= 4) throw error;\n      await sleep(2500 * attempt);\n    }\n  }\n  throw lastError;\n}\nfunction firstSelect(value) { return Array.isArray(value) ? String(value[0]?.text || value[0]?.name || value[0] || '') : String(value || ''); }\nfunction textCell(value) { if (Array.isArray(value)) return value.map((x) => x?.text || x?.name || x).join(''); if (value && typeof value === 'object') return value.text || value.link || ''; return String(value || ''); }\nfunction urlCell(value) { if (Array.isArray(value)) return value[0]?.link || value[0]?.text || ''; if (value && typeof value === 'object') return value.link || value.text || ''; return String(value || ''); }\nfunction linkIds(value) { return Array.isArray(value) ? value.map((x) => x?.record_id || x?.id || x?.record_ids?.[0] || x).filter(Boolean) : []; }\nfunction urlValue(url) { return url ? { text: url, link: url } : null; }\nfunction parseJson(input) {\n  if (input && typeof input === 'object' && !input.text && !input.output) return input;\n  const raw = String(input?.text || input?.output || input?.response || '');\n  const cleaned = raw.replace(/^\\s*\\`\\`\\`(?:json)?/i, '').replace(/\\`\\`\\`\\s*$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch {}\n  const first = cleaned.indexOf('{'); const last = cleaned.lastIndexOf('}');\n  if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));\n  throw new Error('无法解析 JSON: ' + cleaned.slice(0, 500));\n}\nfunction productBriefFromFields(fields) {\n  return {\n    source_url: urlCell(fields['产品链接']), product_name: textCell(fields['产品名称']), brand_name: textCell(fields['品牌名']), category: textCell(fields['品类']), price_info: textCell(fields['价格信息']), product_main_image_url: urlCell(fields['产品主图URL']),\n    core_functions: textCell(fields['核心功能']), materials_ingredients_technology: textCell(fields['材质成分技术']), specs_parameters: textCell(fields['规格参数']), usage_method: textCell(fields['使用方法']), usage_scenarios: textCell(fields['适用场景']),\n    core_selling_points: textCell(fields['核心卖点']), unique_mechanism: textCell(fields['独特机制']), differentiation: textCell(fields['差异化优势']), core_transformation: textCell(fields['核心蜕变']), proof_points: textCell(fields['证据背书']),\n    target_audience: textCell(fields['目标人群']), user_persona: textCell(fields['使用者画像']), buyer_persona: textCell(fields['购买者画像']), visceral_pain_points: textCell(fields['刺骨痛点']), emotional_triggers: textCell(fields['情绪触发器']), buyer_objections: textCell(fields['购买阻力']),\n    visual_hook_elements: textCell(fields['视觉抓手']), offer_promo_guarantee: textCell(fields['优惠促销保障']), recommended_hook_categories: textCell(fields['推荐Hook分类']), risk_constraints: textCell(fields['禁说内容风险点']), manual_notes: textCell(fields['用户手动备注'])\n  };\n}\n\nconst base = $('Load product for Firecrawl').first().json;\nconst token = await feishuToken();\nconst product = await getRecord(token, PRODUCT_TABLE, base.productRecordId);\nif (!product) throw new Error('找不到产品记录');\nconst brief = productBriefFromFields(product.fields);\nconst allHooks = await optionalListRecords(token, HOOK_TABLE, 200);\nconst relatedHooks = allHooks.filter((r) => linkIds(r.fields['关联产品']).includes(base.productRecordId));\nconst existingCategories = [...new Set(relatedHooks.map((r) => firstSelect(r.fields['Hook分类'])).filter(Boolean))];\nconst specifiedCategory = firstSelect(product.fields['指定Hook分类']);\nconst leanBrief = {\n  product_name: brief.product_name,\n  category: brief.category,\n  price_info: brief.price_info,\n  core_selling_points: brief.core_selling_points,\n  target_audience: brief.target_audience,\n  visceral_pain_points: brief.visceral_pain_points,\n  buyer_objections: brief.buyer_objections,\n  emotional_triggers: brief.emotional_triggers,\n  visual_hook_elements: brief.visual_hook_elements,\n  offer_promo_guarantee: brief.offer_promo_guarantee,\n  risk_constraints: brief.risk_constraints,\n  manual_notes: brief.manual_notes\n};\nconst existingConcepts = relatedHooks.map((r) => textCell(r.fields['Hook概念'])).filter(Boolean).slice(-24);\nreturn [{ json: { ...base, brief: leanBrief, briefStr: JSON.stringify({ mode: base.mode, existing_categories: existingCategories, specified_category: specifiedCategory, product_brief: leanBrief, existing_hook_concepts: existingConcepts }, null, 2) } }];\n"
+        },
+        "id": "15a45bd6-29d2-42ec-b360-984d2db583e9"
+      },
+      {
+        "name": "DeepSeek Hooks",
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.9,
+        "position": [
+          1040,
+          -120
+        ],
+        "parameters": {
+          "promptType": "define",
+          "text": "=请输出 json。\\n\\n{{ $json.briefStr }}",
+          "messages": {
+            "messageValues": [
+              {
+                "type": "SystemMessagePromptTemplate",
+                "message": "你是一位世界级效果广告创意策略师，专精 TikTok、Reels、Shorts 和信息流 UGC 广告。你要基于【产品策略简报】生成高转化 Hook 角度。\n\n## 核心原则\n\n- 产品策略简报只提供产品事实、用户痛点、卖点、阻力和视觉素材。\n- 不要把产品整体锁定为一个认知阶段。\n- 每一条 Hook 都必须单独判断它面向的 `awareness_level`，并写清对应 `emotion_trigger`。\n- 一条 Hook = 分类 + 认知阶段 + 情绪触发 + 视觉开场 + 台词 + 购买阻力反驳。\n\n## Hook 分类\n\n只能使用以下 8 类，不得自创：\n- 对话互动型\n- 视觉冲击型\n- 信任构建型\n- 趋势玩法型\n- 产品展示型\n- 特殊场景型\n- 情感驱动型\n- 促销型\n\n## 认知阶段\n\n每条 Hook 的 `awareness_level` 只能使用：\n- `unaware`：用户还没意识到问题。适合反常识、教育、好奇、生活细节放大。\n- `problem`：用户知道自己有痛点。适合痛点共鸣、冲突、尴尬时刻、情绪放大。\n- `solution`：用户正在找解决方案。适合机制对比、替代方案、为什么这个方法更好。\n- `product`：用户知道这类产品。适合产品优势、信任证据、差异化卖点。\n- `most`：用户接近购买。适合优惠、限时、套装、保障、快速行动理由。\n\n生成时必须覆盖至少 3 个不同的 `awareness_level`。不要让 12 条全部集中在 `most` 或 `product`。\n\n## 情绪触发\n\n每条 Hook 的 `emotion_trigger` 必须具体，不要只写“焦虑”这种泛词。优先从产品简报里的 `emotional_triggers`、`visceral_pain_points`、`buyer_objections` 推导。\n\n可用方向包括但不限于：\n- 安全感\n- 掌控感\n- 害怕踩坑\n- 怕浪费钱\n- 怕显得不专业\n- 省心偷懒\n- 身份认同\n- 被理解感\n- 变美/变好/变轻松的即时期待\n- 限时占便宜\n\n## 生成模式与数量硬规则\n\n你会收到：\n- `product_brief`：产品策略简报\n- `mode`：default / append_same / append_new / specified\n- `existing_categories`：已经生成过的分类\n- `specified_category`：用户指定分类，可为空\n- `existing_hook_concepts`：已经生成过的 Hook 概念\n\n数量必须严格执行：\n- `default`：选择最适合该产品的 4 个分类，每个分类必须生成 3 条，共 12 条。\n- `append_same`：沿用 `existing_categories` 里的 4 个分类，每个分类必须再生成 3 条，共 12 条，不要重复已有角度。\n- `append_new`：尽量选择 `existing_categories` 之外的分类，最多 4 个分类，每个分类必须生成 3 条；如果只剩 2 个新分类，则共 6 条。\n- `specified`：只使用 `specified_category`，必须生成 3 条。\n\n如果 `selected_categories` 有 N 个分类，则 `hooks` 数组长度必须等于 `N * 3`。\n每个分类在 `hooks` 中必须刚好出现 3 次。\n不要因为篇幅、成本或“精选”而减少数量。\n\n## 每类 3 条的差异要求\n\n同一个分类下的 3 条 Hook 必须分别对应不同切入点：\n1. 痛点/冲突切入\n2. 机制/证明切入\n3. 场景/情绪切入\n\n三条不能只是改几个词，必须有不同的第一句话、不同的视觉开场、不同的购买阻力反驳。\n同一分类内 3 条也应尽量覆盖不同 `awareness_level` 或不同 `emotion_trigger`。\n\n## 写作要求\n\n- `hook_concept`：中文 15 字以内，像飞书卡片标题。\n- `hook_script_zh`：中文 40-100 字，只写真人口播/对话台词，不写镜头标注。\n- `hook_script_en`：英文 25-60 词，TikTok native voice，不直译中文。\n- `visual_hook`：0-3 秒镜头脚本，必须包含景别、具体动作、道具、因果动作链。\n- `rehook_zh` / `rehook_en`：反驳购买阻力，必须带具体证据或场景。\n- `benefit_bridge`：机制如何转化为用户可感知收益。\n- `category_rationale`：为什么这个分类适合该产品，引用产品简报字段。\n- `self_score`：1-10 整数。\n- `awareness_level`：只能是 `unaware` / `problem` / `solution` / `product` / `most`。\n- `emotion_trigger`：每条 Hook 的核心情绪触发，必须具体。\n\n## 输出 JSON\n\n严格只返回合法 JSON，不要 Markdown，不要解释，不要代码块：\n\n{\n  \"selected_categories\": [\"分类A\", \"分类B\", \"分类C\", \"分类D\"],\n  \"selection_logic\": \"\",\n  \"hooks\": [\n    {\n      \"hook_category\": \"对话互动型\",\n      \"category_rationale\": \"\",\n      \"hook_concept\": \"\",\n      \"hook_script_zh\": \"\",\n      \"hook_script_en\": \"\",\n      \"awareness_level\": \"problem\",\n      \"emotion_trigger\": \"\",\n      \"visual_hook\": \"\",\n      \"benefit_bridge\": \"\",\n      \"rehook_zh\": \"\",\n      \"rehook_en\": \"\",\n      \"self_score\": 8\n    }\n  ]\n}\n\n## 输出前自检\n\n返回前逐项检查：\n1. `selected_categories` 是否符合 mode？\n2. `hooks.length` 是否等于 `selected_categories.length * 3`？\n3. 每个分类是否刚好 3 条？\n4. 每个分类的 3 条是否分别覆盖痛点/冲突、机制/证明、场景/情绪？\n5. 是否至少覆盖 3 个不同 `awareness_level`？\n6. 每条是否都有具体 `emotion_trigger`？\n7. 是否没有重复 `existing_hook_concepts`？\n"
+              }
+            ]
+          },
+          "batching": {}
+        },
+        "id": "4bbd115d-28f0-4f9b-95fd-edcb3426ca36"
+      },
+      {
+        "name": "DeepSeek Hook Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+        "typeVersion": 1,
+        "position": [
+          1040,
+          120
+        ],
+        "parameters": {
+          "model": "deepseek-chat",
+          "options": {
+            "temperature": 0.7,
+            "responseFormat": "json_object",
+            "timeout": 180000,
+            "maxTokens": 8000
+          }
+        },
+        "credentials": {
+          "deepSeekApi": {
+            "id": "hrqsFWPtR87WzqHs",
+            "name": "DeepSeek"
+          }
+        },
+        "id": "1f2215b9-835a-43af-a052-6708cc5dffcf"
+      },
+      {
+        "name": "Write hooks",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1300,
+          -120
+        ],
+        "parameters": {
+          "language": "javaScript",
+          "jsCode": "\n\nconst APP_TOKEN = \"YOUR_FEISHU_BASE_TOKEN\";\nconst PRODUCT_TABLE = \"YOUR_PRODUCT_TABLE_ID\";\nconst HOOK_TABLE = \"YOUR_HOOK_TABLE_ID\";\nconst FEISHU_APP_ID = 'YOUR_FEISHU_APP_ID';\nconst FEISHU_APP_SECRET = String($env.FEISHU_APP_SECRET || '');\nconst httpRequest = (options) => this.helpers.httpRequest(options);\nasync function requestJson(options, label) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const response = await httpRequest({ ...options, json: true, simple: false, resolveWithFullResponse: true, timeout: options.timeout || 120000 });\n      const statusCode = response.statusCode || response.status || 200;\n      const body = response.body ?? response;\n      if (statusCode < 200 || statusCode >= 300) throw new Error(label + ' HTTP ' + statusCode + ': ' + JSON.stringify(body).slice(0, 1000));\n      return body;\n    } catch (error) {\n      lastError = error;\n      const message = String(error?.message || error || '');\n      const responseBody = error?.response?.body || error?.response?.data || {};\n      const responseText = JSON.stringify(responseBody);\n      const transient = responseBody?.code === 1254607\n        || responseText.includes('1254607')\n        || message.includes('1254607')\n        || message.includes('Client network socket disconnected')\n        || message.includes('socket hang up')\n        || message.includes('ECONNRESET')\n        || message.includes('ETIMEDOUT')\n        || message.includes('EAI_AGAIN')\n        || message.includes('HTTP 500')\n        || message.includes('HTTP 502')\n        || message.includes('HTTP 503')\n        || message.includes('HTTP 504');\n      if (!transient || attempt >= 4) throw error;\n      await sleep(2000 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function feishuToken() {\n  const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', headers: { 'Content-Type': 'application/json' }, body: { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET } }, '飞书取 token');\n  return res.tenant_access_token;\n}\nfunction isFeishuNotReady(error) {\n  const message = String(error?.message || error || '');\n  return message.includes('1254607')\n    || message.includes('Client network socket disconnected')\n    || message.includes('socket hang up')\n    || message.includes('ECONNRESET')\n    || message.includes('ETIMEDOUT')\n    || message.includes('EAI_AGAIN');\n}\nasync function withFeishuRetry(operation, label, attempts = 5) {\n  let lastError;\n  for (let attempt = 1; attempt <= attempts; attempt++) {\n    try {\n      return await operation();\n    } catch (error) {\n      lastError = error;\n      if (!isFeishuNotReady(error) || attempt >= attempts) throw error;\n      await sleep(1500 * attempt);\n    }\n  }\n  throw lastError;\n}\nasync function getRecord(token, tableId, recordId) {\n  try {\n    return await withFeishuRetry(async () => {\n      const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token } }, '飞书读记录');\n      return res?.data?.record;\n    }, '飞书读记录', 6);\n  } catch (error) {\n    const records = await listRecords(token, tableId, 200);\n    const fallback = records.find((record) => record.record_id === recordId);\n    if (fallback) return fallback;\n    throw error;\n  }\n}\nasync function listRecords(token, tableId, pageSize = 200) {\n  return await withFeishuRetry(async () => {\n    const res = await requestJson({ method: 'GET', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize, headers: { Authorization: 'Bearer ' + token } }, '飞书列记录');\n    return res?.data?.items || [];\n  }, '飞书列记录');\n}\nasync function optionalListRecords(token, tableId, pageSize = 200) {\n  try {\n    return await listRecords(token, tableId, pageSize);\n  } catch {\n    return [];\n  }\n}\nasync function updateRecord(token, tableId, recordId, fields) {\n  await withFeishuRetry(async () => {\n    await requestJson({ method: 'PUT', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/' + recordId, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { fields } }, '飞书更新记录');\n  }, '飞书更新记录');\n}\nasync function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }\nasync function batchCreate(token, tableId, records) {\n  let lastError;\n  for (let attempt = 1; attempt <= 4; attempt++) {\n    try {\n      const res = await requestJson({ method: 'POST', url: 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + APP_TOKEN + '/tables/' + tableId + '/records/batch_create', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json; charset=utf-8' }, body: { records } }, '飞书批量创建');\n      return res?.data?.records || [];\n    } catch (error) {\n      lastError = error;\n      if (!String(error.message || error).includes('1254607') || attempt >= 4) throw error;\n      await sleep(2500 * attempt);\n    }\n  }\n  throw lastError;\n}\nfunction firstSelect(value) { return Array.isArray(value) ? String(value[0]?.text || value[0]?.name || value[0] || '') : String(value || ''); }\nfunction textCell(value) { if (Array.isArray(value)) return value.map((x) => x?.text || x?.name || x).join(''); if (value && typeof value === 'object') return value.text || value.link || ''; return String(value || ''); }\nfunction urlCell(value) { if (Array.isArray(value)) return value[0]?.link || value[0]?.text || ''; if (value && typeof value === 'object') return value.link || value.text || ''; return String(value || ''); }\nfunction linkIds(value) { return Array.isArray(value) ? value.map((x) => x?.record_id || x?.id || x?.record_ids?.[0] || x).filter(Boolean) : []; }\nfunction urlValue(url) { return url ? { text: url, link: url } : null; }\nfunction parseJson(input) {\n  if (input && typeof input === 'object' && !input.text && !input.output) return input;\n  const raw = String(input?.text || input?.output || input?.response || '');\n  const cleaned = raw.replace(/^\\s*\\`\\`\\`(?:json)?/i, '').replace(/\\`\\`\\`\\s*$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch {}\n  const first = cleaned.indexOf('{'); const last = cleaned.lastIndexOf('}');\n  if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));\n  throw new Error('无法解析 JSON: ' + cleaned.slice(0, 500));\n}\nfunction productBriefFromFields(fields) {\n  return {\n    source_url: urlCell(fields['产品链接']), product_name: textCell(fields['产品名称']), brand_name: textCell(fields['品牌名']), category: textCell(fields['品类']), price_info: textCell(fields['价格信息']), product_main_image_url: urlCell(fields['产品主图URL']),\n    core_functions: textCell(fields['核心功能']), materials_ingredients_technology: textCell(fields['材质成分技术']), specs_parameters: textCell(fields['规格参数']), usage_method: textCell(fields['使用方法']), usage_scenarios: textCell(fields['适用场景']),\n    core_selling_points: textCell(fields['核心卖点']), unique_mechanism: textCell(fields['独特机制']), differentiation: textCell(fields['差异化优势']), core_transformation: textCell(fields['核心蜕变']), proof_points: textCell(fields['证据背书']),\n    target_audience: textCell(fields['目标人群']), user_persona: textCell(fields['使用者画像']), buyer_persona: textCell(fields['购买者画像']), visceral_pain_points: textCell(fields['刺骨痛点']), emotional_triggers: textCell(fields['情绪触发器']), buyer_objections: textCell(fields['购买阻力']),\n    visual_hook_elements: textCell(fields['视觉抓手']), offer_promo_guarantee: textCell(fields['优惠促销保障']), recommended_hook_categories: textCell(fields['推荐Hook分类']), risk_constraints: textCell(fields['禁说内容风险点']), manual_notes: textCell(fields['用户手动备注'])\n  };\n}\n\nconst base = $('Prepare hooks from product').first().json;\nconst token = await feishuToken();\nconst product = await getRecord(token, PRODUCT_TABLE, base.productRecordId);\nconst productUrl = urlCell(product.fields['产品链接']);\ntry {\n  const parsed = parseJson($input.first().json);\n  const hooks = Array.isArray(parsed.hooks) ? parsed.hooks : [];\n  if (!hooks.length) throw new Error('Hook 生成结果为空。');\n  const batch = base.mode + '-' + Date.now();\n  const strategyMap = { default: '默认精选', append_same: '同类追加', append_new: '换分类', specified: '指定分类' };\n  const productName = brief.product_name || textCell(product.fields['产品名称']) || '';\n  const records = hooks.map((h) => ({ fields: {\n    '产品链接': urlValue(productUrl), '产品名称': productName, 'Hook分类': h.hook_category || '', 'Hook概念': h.hook_concept || '', '开头脚本_zh': h.hook_script_zh || '', '开头脚本_en': h.hook_script_en || '',\n    'Rehook_zh': h.rehook_zh || '', 'Rehook_en': h.rehook_en || '', '认知阶段': h.awareness_level || 'problem', '情绪触发': h.emotion_trigger || '', '视觉开场': h.visual_hook || '', '收益桥接': h.benefit_bridge || '', '分类理由': h.category_rationale || '',\n    '自评分': Number(h.self_score) || 0, '生成批次': batch, '分类策略': strategyMap[base.mode] || '默认精选', '脚本状态': '未生成', '关联产品': [base.productRecordId]\n  }}));\n  await batchCreate(token, HOOK_TABLE, records);\n  await updateRecord(token, PRODUCT_TABLE, base.productRecordId, { '状态': '已生成', '已生成分类记录': (parsed.selected_categories || []).join(' / '), '错误信息': '' });\n  return [{ json: { message: 'Hook generated', created: records.length, categories: parsed.selected_categories || [] } }];\n} catch (error) {\n  await updateRecord(token, PRODUCT_TABLE, base.productRecordId, { '状态': '失败', '错误信息': (error.message || String(error)).slice(0, 4000) });\n  throw error;\n}\n"
+        },
+        "id": "a1b77bf3-39be-49a9-a0f9-5856262439fb"
+      }
+    ],
+    "connections": {
+      "Webhook: Generate Hooks": {
+        "main": [
+          [
+            {
+              "node": "Load product for Firecrawl",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load product for Firecrawl": {
+        "main": [
+          [
+            {
+              "node": "Mode is hooks only?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Mode is hooks only?": {
+        "main": [
+          [
+            {
+              "node": "Prepare hooks from product",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Firecrawl scrape",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Firecrawl scrape": {
+        "main": [
+          [
+            {
+              "node": "Prepare product brief input",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare product brief input": {
+        "main": [
+          [
+            {
+              "node": "DeepSeek Product Brief",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "DeepSeek Product Brief": {
+        "main": [
+          [
+            {
+              "node": "Write product brief",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "DeepSeek Product Brief Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "DeepSeek Product Brief",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare hooks from product": {
+        "main": [
+          [
+            {
+              "node": "DeepSeek Hooks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "DeepSeek Hooks": {
+        "main": [
+          [
+            {
+              "node": "Write hooks",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "DeepSeek Hook Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "DeepSeek Hooks",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Yueying Wu",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-05-22T09:54:23.542Z",
+        "id": 268,
+        "workflowId": "5mGoEA5kHAfeftvF",
+        "versionId": "059df0f9-56d9-45ed-951c-ac4711eec87d",
+        "event": "activated",
+        "userId": "5aa488b4-77bf-43f0-82bd-3daccdaa2b29"
+      },
+      {
+        "createdAt": "2026-05-22T09:54:23.516Z",
+        "id": 267,
+        "workflowId": "5mGoEA5kHAfeftvF",
+        "versionId": "059df0f9-56d9-45ed-951c-ac4711eec87d",
+        "event": "deactivated",
+        "userId": "5aa488b4-77bf-43f0-82bd-3daccdaa2b29"
+      }
+    ]
+  }
+}
