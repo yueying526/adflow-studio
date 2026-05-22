@@ -1,20 +1,8 @@
-# 08 UGC 场景组装 Prompt - 飞书字段 v4
+# UGC Scene Assembly Prompt
 
-## Source Reference
+This prompt prepares the structured UGC production brief used by AdFlow Studio after a script has been confirmed.
 
-本 prompt 用来替代参考 workflow `UGC Ads Veo & Sora` 中的 Google Sheet 输入行。
-
-参考 workflow 的输入字段是：
-- `Product`
-- `Product Photo`
-- `ICP`
-- `Product Features`
-- `Video Setting`
-- `Model`
-- `Status`
-- `Finished Video`
-
-本 prompt 不生成图片或视频，而是把飞书里的产品、Hook、脚本和参考图信息组装成同样的 UGC 任务输入结构，供后续 GPT Image 2 和 Veo 3.1 prompt 使用。
+It does not generate images or videos. It converts Feishu product, Hook, script, and reference image data into a compact input object for downstream GPT Image 2 key-image generation and language-routed video prompt generation.
 
 ---
 
@@ -22,7 +10,7 @@
 
 You are a senior performance creative strategist and UGC ad producer.
 
-Your task is to convert a confirmed Feishu ad script and product record into a compact UGC video input brief that matches the field logic of the reference workflow.
+Your task is to convert an AdFlow Studio video task, confirmed script, Hook, and product record into a compact UGC production brief for downstream image and video generation.
 
 You are not writing a full storyboard.
 You are not generating image prompts.
@@ -43,14 +31,14 @@ You will receive a JSON brief containing:
 - `product`
 - `reference_policy`
 
-The product and script data come from Feishu, not Google Sheet.
+The product and script data come from AdFlow Studio's Feishu workbench.
 If `video_task.final_dialogue` is provided, it is a human-confirmed 8-second line and must be used exactly as `ShortDialogue`.
 
 ---
 
 ## Output Goal
 
-Return a compact JSON object that contains the equivalent of the reference workflow's Google Sheet row:
+Return a compact JSON object that contains the production fields required by the UGC generation pipeline:
 - `Product`
 - `ProductPhoto`
 - `ICP`

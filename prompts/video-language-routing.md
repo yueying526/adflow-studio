@@ -1,11 +1,10 @@
-# 11 UGC 视频 Prompt - 语言路由 v2
+# UGC Video Prompt - Language Routing
 
-## Source Reference
+This prompt generates the final video-generation prompt used by AdFlow Studio.
 
-本 prompt 基于 `07_UGC视频Prompt_Veo参考改造_v1.md` 改造，保留参考 workflow `UGC Ads Veo & Sora` 的 UGC 自拍口播结构，同时新增按语言路由的视频模型要求：
-
-- 英文：面向 KIE Veo 3.1 Fast，输出英文 prompt，适合英文口播。
-- 中文：面向 KIE Seedance 2.0 Fast，输出中文 prompt，强调中文自然口播和音画同步。
+It keeps the output model-aware:
+- English videos use KIE Veo 3.1 Fast and require natural English spoken UGC audio.
+- Chinese videos use KIE Seedance 2.0 Fast and require natural Chinese口播 with audio-lip synchronization.
 
 ---
 

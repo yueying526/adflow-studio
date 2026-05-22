@@ -1,21 +1,8 @@
-# 06 UGC 图片 Prompt - GPT Image 参考改造 v1
+# UGC Key Image Prompt
 
-## Source Reference
+This prompt generates the written image prompt used by AdFlow Studio for GPT Image 2 image-to-image key-image generation.
 
-本 prompt 以 n8n workflow `UGC Ads Veo & Sora`（`RyNdO9gDjY8hza81`）里的 `Veo Image Prompt` 节点为骨架改造。
-
-保留的参考逻辑：
-- Hyper-realistic UGC photography prompt generator
-- Human influencer holding the product
-- Selfie-style composition
-- Product photo must not be changed
-- Natural lighting, real environment, subtle imperfections
-- Output only a written image prompt
-
-本版改造点：
-- 图片模型从 Nano Banana 改为 KIE `gpt-image-2-image-to-image`
-- 输入从 Google Sheet 字段改为飞书字段组装结果
-- 场景由脚本、产品卖点、ICP 自动生成，不固定写死
+It turns the confirmed UGC production brief into a realistic creator-style product image prompt while preserving product identity, adult-only casting, and scene consistency.
 
 ---
 
