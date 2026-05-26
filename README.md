@@ -25,6 +25,15 @@ The interface stays in Chinese for operators. The final video language is select
 - **Chinese** routes to Seedance 2.0 Fast with native spoken audio.
 - **English** routes to Veo 3.1 Fast with English spoken audio.
 
+## Demo Outputs
+
+These are real 8-second UGC-style videos generated through the AdFlow Studio workflow.
+
+| Apparel / travel scenario | Beauty product scenario |
+| --- | --- |
+| [![AdFlow Studio apparel demo](public/demo/adflow-demo-01-poster.jpg)](public/demo/adflow-demo-01.mp4) | [![AdFlow Studio beauty demo](public/demo/adflow-demo-02-poster.jpg)](public/demo/adflow-demo-02.mp4) |
+| [Watch MP4](public/demo/adflow-demo-01.mp4) | [Watch MP4](public/demo/adflow-demo-02.mp4) |
+
 ## Local Frontend
 
 ```bash
@@ -57,6 +66,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system design and data 
 - `lib/`: Feishu and n8n integration helpers.
 - `n8n/`: sanitized workflow templates for import.
 - `docs/`: public setup and architecture docs.
+- `public/demo/`: real generated sample videos and poster images.
 - `prompts/`: public prompt templates used by the production workflow.
 - `config/final_base_config.example.json`: public Feishu Base config template.
 - `config/feishu_base_schema.template.json`: public Feishu table and field schema.
