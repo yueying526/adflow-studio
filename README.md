@@ -47,6 +47,8 @@ The frontend is a local proxy only. API keys are never exposed in the browser.
 
 See [docs/SETUP.md](docs/SETUP.md) for Feishu, n8n, environment variable, and workflow import steps.
 
+See [docs/FEISHU_TEMPLATE.md](docs/FEISHU_TEMPLATE.md) and [config/feishu_base_schema.template.json](config/feishu_base_schema.template.json) for the Feishu Base schema.
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system design and data flow.
 
 ## Repository Contents
@@ -57,6 +59,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system design and data 
 - `docs/`: public setup and architecture docs.
 - `prompts/`: public prompt templates used by the production workflow.
 - `config/final_base_config.example.json`: public Feishu Base config template.
+- `config/feishu_base_schema.template.json`: public Feishu table and field schema.
 - `.env.example`: required local environment variables.
 
 Internal project notes, Feishu backups, interview scripts, and local generated outputs are intentionally ignored by git.

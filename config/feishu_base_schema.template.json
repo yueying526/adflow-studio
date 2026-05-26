@@ -1,0 +1,544 @@
+{
+  "name": "AdFlow Studio Feishu Base Template",
+  "description": "Sanitized Feishu Base schema for recreating the AdFlow Studio data workbench.",
+  "tables": {
+    "product": {
+      "name": "产品工作台",
+      "fields": [
+        {
+          "name": "产品链接",
+          "type": "url"
+        },
+        {
+          "name": "状态",
+          "type": "single_select",
+          "options": [
+            "待生成",
+            "生成中",
+            "已生成",
+            "失败"
+          ]
+        },
+        {
+          "name": "产品名称",
+          "type": "text"
+        },
+        {
+          "name": "品牌名",
+          "type": "text"
+        },
+        {
+          "name": "品类",
+          "type": "text"
+        },
+        {
+          "name": "价格信息",
+          "type": "text"
+        },
+        {
+          "name": "产品主图URL",
+          "type": "url"
+        },
+        {
+          "name": "产品图附件",
+          "type": "attachment"
+        },
+        {
+          "name": "核心功能",
+          "type": "text"
+        },
+        {
+          "name": "材质成分技术",
+          "type": "text"
+        },
+        {
+          "name": "规格参数",
+          "type": "text"
+        },
+        {
+          "name": "使用方法",
+          "type": "text"
+        },
+        {
+          "name": "适用场景",
+          "type": "text"
+        },
+        {
+          "name": "核心卖点",
+          "type": "text"
+        },
+        {
+          "name": "独特机制",
+          "type": "text"
+        },
+        {
+          "name": "差异化优势",
+          "type": "text"
+        },
+        {
+          "name": "核心蜕变",
+          "type": "text"
+        },
+        {
+          "name": "证据背书",
+          "type": "text"
+        },
+        {
+          "name": "目标人群",
+          "type": "text"
+        },
+        {
+          "name": "使用者画像",
+          "type": "text"
+        },
+        {
+          "name": "购买者画像",
+          "type": "text"
+        },
+        {
+          "name": "刺骨痛点",
+          "type": "text"
+        },
+        {
+          "name": "情绪触发器",
+          "type": "text"
+        },
+        {
+          "name": "购买阻力",
+          "type": "text"
+        },
+        {
+          "name": "视觉抓手",
+          "type": "text"
+        },
+        {
+          "name": "优惠促销保障",
+          "type": "text"
+        },
+        {
+          "name": "推荐Hook分类",
+          "type": "text"
+        },
+        {
+          "name": "禁说内容风险点",
+          "type": "text"
+        },
+        {
+          "name": "用户手动备注",
+          "type": "text"
+        },
+        {
+          "name": "指定Hook分类",
+          "type": "single_select",
+          "options": [
+            "对话互动型",
+            "视觉冲击型",
+            "信任构建型",
+            "趋势玩法型",
+            "产品展示型",
+            "特殊场景型",
+            "情感驱动型",
+            "促销型"
+          ]
+        },
+        {
+          "name": "已生成分类记录",
+          "type": "text"
+        },
+        {
+          "name": "原始抓取内容",
+          "type": "text"
+        },
+        {
+          "name": "错误信息",
+          "type": "text"
+        },
+        {
+          "name": "创建时间",
+          "type": "created_time",
+          "system": true
+        },
+        {
+          "name": "Hook角度",
+          "type": "link",
+          "linkedTable": "hook"
+        },
+        {
+          "name": "脚本记录",
+          "type": "link",
+          "linkedTable": "script"
+        },
+        {
+          "name": "视频任务",
+          "type": "link",
+          "linkedTable": "video"
+        },
+        {
+          "name": "生成Hook",
+          "type": "formula",
+          "formula": "See docs/FEISHU_TEMPLATE.md for webhook formula pattern."
+        },
+        {
+          "name": "同类追加Hook",
+          "type": "formula",
+          "formula": "See docs/FEISHU_TEMPLATE.md for webhook formula pattern."
+        },
+        {
+          "name": "换分类生成Hook",
+          "type": "formula",
+          "formula": "See docs/FEISHU_TEMPLATE.md for webhook formula pattern."
+        },
+        {
+          "name": "指定分类生成Hook",
+          "type": "formula",
+          "formula": "See docs/FEISHU_TEMPLATE.md for webhook formula pattern."
+        }
+      ]
+    },
+    "hook": {
+      "name": "Hook角度池",
+      "fields": [
+        {
+          "name": "产品链接",
+          "type": "url"
+        },
+        {
+          "name": "Hook分类",
+          "type": "single_select",
+          "options": [
+            "对话互动型",
+            "视觉冲击型",
+            "信任构建型",
+            "趋势玩法型",
+            "产品展示型",
+            "特殊场景型",
+            "情感驱动型",
+            "促销型"
+          ]
+        },
+        {
+          "name": "认知阶段",
+          "type": "single_select",
+          "options": [
+            "unaware",
+            "problem",
+            "solution",
+            "product",
+            "most"
+          ]
+        },
+        {
+          "name": "情绪触发",
+          "type": "text"
+        },
+        {
+          "name": "Hook概念",
+          "type": "text"
+        },
+        {
+          "name": "开头脚本_zh",
+          "type": "text"
+        },
+        {
+          "name": "开头脚本_en",
+          "type": "text"
+        },
+        {
+          "name": "Rehook_zh",
+          "type": "text"
+        },
+        {
+          "name": "Rehook_en",
+          "type": "text"
+        },
+        {
+          "name": "视觉开场",
+          "type": "text"
+        },
+        {
+          "name": "收益桥接",
+          "type": "text"
+        },
+        {
+          "name": "分类理由",
+          "type": "text"
+        },
+        {
+          "name": "自评分",
+          "type": "number"
+        },
+        {
+          "name": "生成批次",
+          "type": "text"
+        },
+        {
+          "name": "分类策略",
+          "type": "single_select",
+          "options": [
+            "默认精选",
+            "同类追加",
+            "换分类",
+            "指定分类"
+          ]
+        },
+        {
+          "name": "脚本状态",
+          "type": "single_select",
+          "options": [
+            "未生成",
+            "生成中",
+            "已生成",
+            "失败"
+          ]
+        },
+        {
+          "name": "错误信息",
+          "type": "text"
+        },
+        {
+          "name": "创建时间",
+          "type": "created_time",
+          "system": true
+        },
+        {
+          "name": "关联产品",
+          "type": "link",
+          "linkedTable": "product"
+        },
+        {
+          "name": "脚本记录",
+          "type": "link",
+          "linkedTable": "script"
+        },
+        {
+          "name": "视频任务",
+          "type": "link",
+          "linkedTable": "video"
+        },
+        {
+          "name": "生成脚本",
+          "type": "formula",
+          "formula": "See docs/FEISHU_TEMPLATE.md for webhook formula pattern."
+        },
+        {
+          "name": "产品名称",
+          "type": "text"
+        }
+      ]
+    },
+    "script": {
+      "name": "脚本工作台",
+      "fields": [
+        {
+          "name": "脚本标题",
+          "type": "text"
+        },
+        {
+          "name": "产品链接",
+          "type": "url"
+        },
+        {
+          "name": "语言",
+          "type": "single_select",
+          "options": [
+            "中文",
+            "英文"
+          ]
+        },
+        {
+          "name": "脚本版本",
+          "type": "text"
+        },
+        {
+          "name": "生成状态",
+          "type": "single_select",
+          "options": [
+            "生成中",
+            "已生成",
+            "失败"
+          ]
+        },
+        {
+          "name": "确认状态",
+          "type": "single_select",
+          "options": [
+            "待确认",
+            "已确认",
+            "放弃"
+          ]
+        },
+        {
+          "name": "完整脚本_zh",
+          "type": "text"
+        },
+        {
+          "name": "完整脚本_en",
+          "type": "text"
+        },
+        {
+          "name": "CTA_zh",
+          "type": "text"
+        },
+        {
+          "name": "CTA_en",
+          "type": "text"
+        },
+        {
+          "name": "模型信息",
+          "type": "text"
+        },
+        {
+          "name": "错误信息",
+          "type": "text"
+        },
+        {
+          "name": "创建时间",
+          "type": "created_time",
+          "system": true
+        },
+        {
+          "name": "关联产品",
+          "type": "link",
+          "linkedTable": "product"
+        },
+        {
+          "name": "关联Hook",
+          "type": "link",
+          "linkedTable": "hook"
+        },
+        {
+          "name": "视频任务",
+          "type": "link",
+          "linkedTable": "video"
+        },
+        {
+          "name": "创建视频任务",
+          "type": "formula",
+          "formula": "See docs/FEISHU_TEMPLATE.md for webhook formula pattern."
+        }
+      ]
+    },
+    "video": {
+      "name": "视频任务",
+      "fields": [
+        {
+          "name": "视频标题",
+          "type": "text"
+        },
+        {
+          "name": "产品链接",
+          "type": "url"
+        },
+        {
+          "name": "视频状态",
+          "type": "single_select",
+          "options": [
+            "待补素材",
+            "生成关键图中",
+            "生成视频中",
+            "视频已生成",
+            "失败"
+          ]
+        },
+        {
+          "name": "语言",
+          "type": "single_select",
+          "options": [
+            "中文",
+            "英文"
+          ]
+        },
+        {
+          "name": "产品图附件",
+          "type": "attachment"
+        },
+        {
+          "name": "产品图URL",
+          "type": "url"
+        },
+        {
+          "name": "产品图来源说明",
+          "type": "text"
+        },
+        {
+          "name": "达人偏好",
+          "type": "text"
+        },
+        {
+          "name": "UGC场景JSON",
+          "type": "text"
+        },
+        {
+          "name": "UGC图片Prompt",
+          "type": "text"
+        },
+        {
+          "name": "UGC关键图URL",
+          "type": "url"
+        },
+        {
+          "name": "UGC关键图分析",
+          "type": "text"
+        },
+        {
+          "name": "Veo视频Prompt",
+          "type": "text"
+        },
+        {
+          "name": "Veo口播脚本",
+          "type": "text"
+        },
+        {
+          "name": "KIE图片任务ID",
+          "type": "text"
+        },
+        {
+          "name": "KIE视频任务ID",
+          "type": "text"
+        },
+        {
+          "name": "视频URL",
+          "type": "url"
+        },
+        {
+          "name": "生成配置",
+          "type": "text"
+        },
+        {
+          "name": "错误信息",
+          "type": "text"
+        },
+        {
+          "name": "创建时间",
+          "type": "created_time",
+          "system": true
+        },
+        {
+          "name": "关联产品",
+          "type": "link",
+          "linkedTable": "product"
+        },
+        {
+          "name": "关联Hook",
+          "type": "link",
+          "linkedTable": "hook"
+        },
+        {
+          "name": "关联脚本",
+          "type": "link",
+          "linkedTable": "script"
+        },
+        {
+          "name": "生成视频",
+          "type": "formula",
+          "formula": "See docs/FEISHU_TEMPLATE.md for webhook formula pattern."
+        }
+      ]
+    }
+  },
+  "notes": [
+    "Create the four tables first, then create link fields after all target tables exist.",
+    "Formula fields are optional for the frontend workflow. They are useful when operating directly inside Feishu.",
+    "Replace webhook placeholders with your own n8n webhook URLs."
+  ]
+}

@@ -50,6 +50,11 @@ Create four tables and keep the business meaning consistent:
 - `脚本工作台`: one row per generated script.
 - `视频任务`: one row per generated UGC video task.
 
+Use the public schema template as the source of truth:
+
+- Human-readable guide: [FEISHU_TEMPLATE.md](FEISHU_TEMPLATE.md)
+- Machine-readable schema: [`config/feishu_base_schema.template.json`](../config/feishu_base_schema.template.json)
+
 After creating the tables, copy the example config and fill your Base token and table IDs:
 
 ```bash
