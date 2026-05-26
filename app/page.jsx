@@ -413,6 +413,35 @@ export default function Page() {
     }
   }
 
+  function startNewTask() {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(lastProductStorageKey);
+      window.localStorage.removeItem(lastProductUrlStorageKey);
+    }
+    setProductUrl('');
+    setLanguage('中文');
+    setPersona(defaultPersona);
+    setProductImageUrl('');
+    setProductId('');
+    setSelectedHookId('');
+    setSelectedScriptId('');
+    setVideoId('');
+    setWorkbench(null);
+    setLoading('');
+    setError('');
+    setNotice('已开始新任务。请输入新的产品链接。');
+    setPendingScriptHookId('');
+    setPendingVideoGenerateId('');
+    setPendingHooks(false);
+    setManualNotes('');
+    setVoiceScript('');
+    setVoiceScriptSourceKey('');
+    setVideoSettingsSourceKey('');
+    setBriefDraft(emptyBriefDraft);
+    setBriefDraftProductId('');
+    setFilters({ category: '', awareness: '', emotion: '' });
+  }
+
   async function generateHooks() {
     if (!productId) return;
     setError('');
@@ -515,6 +544,9 @@ export default function Page() {
           <div className="status-stack">
             <div className="status-pill">{statusLabel(workbench)}</div>
             <div className="model-pill">{languageModels[language]}</div>
+            <button className="button secondary small-button" onClick={startNewTask} type="button">
+              新建任务
+            </button>
           </div>
         </div>
 
@@ -546,6 +578,11 @@ export default function Page() {
                   <button className="button secondary" type="button" onClick={() => setProductUrl(sampleUrl)}>
                     Reset sample
                   </button>
+                  {productId ? (
+                    <button className="button secondary" type="button" onClick={startNewTask}>
+                      新建任务
+                    </button>
+                  ) : null}
                   {briefReady ? <span className="action-note">当前简报已锁定。继续下一步不会重新生成产品简报。</span> : null}
                 </div>
               </form>
