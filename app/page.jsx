@@ -513,12 +513,16 @@ export default function Page() {
     setError('');
     setLoading('video');
     try {
+      const effectiveProductImageUrl = productImageUrl.trim()
+        || currentVideo?.productImageUrl
+        || workbench?.product?.imageUrl
+        || '';
       let targetVideoId = currentVideo?.id || videoId;
       if (!targetVideoId) {
         setNotice('正在创建视频任务，然后会自动开始生成视频。');
         const task = await api(`/api/scripts/${selectedScript.id}/video-task`, {
           method: 'POST',
-          body: JSON.stringify({ persona, productImageUrl, language, voiceScript }),
+          body: JSON.stringify({ persona, productImageUrl: effectiveProductImageUrl, language, voiceScript }),
         });
         targetVideoId = task.videoId;
         if (targetVideoId) setVideoId(targetVideoId);
@@ -527,7 +531,7 @@ export default function Page() {
       setNotice(`视频生成已提交。${language === '中文' ? '中文会走 Seedance 2.0 Fast，自带中文口播。' : '英文会走 Veo 3.1 Fast，自带英文口播。'}先生成关键图，再生成视频，请等待页面自动刷新。`);
       await api(`/api/videos/${targetVideoId}/generate`, {
         method: 'POST',
-        body: JSON.stringify({ persona, productImageUrl, language, voiceScript }),
+        body: JSON.stringify({ persona, productImageUrl: effectiveProductImageUrl, language, voiceScript }),
       });
       setPendingVideoGenerateId(targetVideoId);
       await refresh();
