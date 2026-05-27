@@ -152,15 +152,46 @@ function singleSpeakerDialogue(text, language, isDialogueInteractive = false) {
   return '朋友问我为什么推荐它，我说好穿又省心';
 }
 
+function stripTimeLabel(line) {
+  return String(line || '')
+    .replace(/^\s*\d+\s*[-–—~到]\s*\d+\s*(?:秒|s|sec|seconds)?\s*[：:]\s*/i, '')
+    .trim();
+}
+
+function extractOpening8Seconds(script) {
+  const value = String(script || '').trim();
+  if (!value) return '';
+  const lines = value.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const timedOpening = [];
+
+  for (const line of lines) {
+    const match = line.match(/^\s*(\d+)\s*[-–—~到]\s*(\d+)\s*(?:秒|s|sec|seconds)?\s*[：:]\s*(.*)$/i);
+    if (!match) continue;
+    const start = Number(match[1]);
+    if (Number.isFinite(start) && start < 8) timedOpening.push(match[3].trim());
+  }
+
+  if (timedOpening.length) return timedOpening.join(' ').replace(/\s+/g, ' ').trim();
+  return stripTimeLabel(lines[0] || value);
+}
+
 function baseDialogueFrom({ language, selectedHook, selectedScript, currentVideo }) {
   const isDialogueInteractive = selectedHook?.category === '对话互动型';
   if (currentVideo?.voiceScript && (!currentVideo.language || currentVideo.language === language)) {
     return singleSpeakerDialogue(currentVideo.voiceScript, language, isDialogueInteractive);
   }
   if (language === '英文') {
-    return singleSpeakerDialogue(selectedHook?.scriptEn || selectedScript?.scriptEn || selectedScript?.ctaEn || '', language, isDialogueInteractive);
+    return singleSpeakerDialogue(
+      extractOpening8Seconds(selectedScript?.scriptEn) || selectedHook?.scriptEn || selectedScript?.ctaEn || '',
+      language,
+      isDialogueInteractive,
+    );
   }
-  return singleSpeakerDialogue(selectedHook?.scriptZh || selectedScript?.scriptZh || selectedScript?.ctaZh || '', language, isDialogueInteractive);
+  return singleSpeakerDialogue(
+    extractOpening8Seconds(selectedScript?.scriptZh) || selectedHook?.scriptZh || selectedScript?.ctaZh || '',
+    language,
+    isDialogueInteractive,
+  );
 }
 
 function countDialogueUnits(text) {
@@ -357,7 +388,7 @@ export default function Page() {
 
   useEffect(() => {
     if (!selectedScript) return;
-    const sourceKey = `${selectedScript.id}:${selectedHook?.id || ''}:${currentVideo?.id || 'new'}:${language}:single-speaker-v2`;
+    const sourceKey = `${selectedScript.id}:${selectedHook?.id || ''}:${currentVideo?.id || 'new'}:${language}:opening-8s-v3`;
     if (sourceKey === voiceScriptSourceKey) return;
     const defaultDialogue = baseDialogueFrom({ language, selectedHook, selectedScript, currentVideo });
     setVoiceScript(limitDialogue(defaultDialogue, language));
